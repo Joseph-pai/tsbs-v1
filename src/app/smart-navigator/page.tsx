@@ -15,6 +15,16 @@ export default function SmartNavigatorPage() {
     const [showDetails, setShowDetails] = useState(false);
     const [activeTooltip, setActiveTooltip] = useState<string | null>(null);
 
+    const INTERPRETATION_DETAILS: Record<string, string> = {
+        '高位量縮，籌碼相對穩定': '高位量縮代表股價雖處於近期高點，但成交量縮小，顯示主力惜售，賣壓極輕。這種情況下趨勢往往能維持或進入橫盤，對於持股者而言是籌碼安定的正面訊號。',
+        '高位爆出天量，主力疑似出貨': '「天量」是指成交量異常巨大。在股價高位出現天量，通常是主力趁利多消息將手中大量籌碼轉嫁給散戶的特徵（割韭菜），是極其危險的翻轉訊號。',
+        '高位換手熱烈，請留意追高風險': '代表高檔位置買賣雙方力道都很大，雖然股價還沒崩跌，但波動會加劇。此時追高風險極大，建議觀察是否能站穩成交密集區。',
+        '帶量突破盤整區，動能轉強': '股價盤整多日後，今天買盤強力湧入且推升價格（量價齊揚）。這代表多頭共識達成，通常是新一波漲勢的啟動點。',
+        '主力積極換手，底部量增': '股價在低位跌不動後開始出現大成交量，表示有新的主力進場吃貨並吸收掉散戶的停損單，是底部翻轉、準備起漲的徵兆。',
+        '低位量縮整理，可逢低少量試單': '代表賣盤已經吐盡（賣壓枯竭），股價雖然還沒開始漲，但下行空間有限。此時適合在支撐位附近小量佈局，等待發動。',
+        '價穩量縮，方向待表態': '股價波動變小且成交量委縮，代表市場正在等待下一個驅動消息。目前多空平衡，建議觀察股價會往哪個方向突破再做決定。'
+    };
+
     const handleSearch = async () => {
         if (!stockId) return;
         setIsLoading(true);
@@ -191,14 +201,17 @@ export default function SmartNavigatorPage() {
                             </div>
                             <div className="space-y-4">
                                 {result.interpretations.map((text: string, idx: number) => {
-                                    const isTargetText = text.includes('高位量縮，籌碼相對穩定');
+                                    // Find matching detail from our dictionary
+                                    const matchingKey = Object.keys(INTERPRETATION_DETAILS).find(key => text.includes(key));
+                                    const detail = matchingKey ? INTERPRETATION_DETAILS[matchingKey] : null;
+
                                     return (
                                         <div key={idx} className="relative flex flex-col bg-black/40 p-4 rounded-xl border border-white/5">
                                             <div className="flex gap-3">
                                                 <div className="text-indigo-400 mt-0.5">•</div>
                                                 <div className="text-slate-300 font-medium leading-relaxed flex items-center gap-2 flex-wrap">
                                                     {text}
-                                                    {isTargetText && (
+                                                    {detail && (
                                                         <button 
                                                             onClick={() => setActiveTooltip(activeTooltip === text ? null : text)}
                                                             className="text-indigo-400 hover:text-white transition-colors inline-flex"
@@ -208,10 +221,10 @@ export default function SmartNavigatorPage() {
                                                     )}
                                                 </div>
                                             </div>
-                                            {activeTooltip === text && isTargetText && (
+                                            {activeTooltip === text && detail && (
                                                 <div className="mt-3 p-4 bg-indigo-500/10 border border-indigo-500/20 rounded-lg text-xs text-slate-300 leading-loose animate-in slide-in-from-top-2 duration-300">
                                                     <div className="text-white font-bold mb-1">💡 專家解讀：</div>
-                                                    高位量縮代表股價雖處於近期高點，但成交量卻縮小（想賣的人更少），顯示主力惜售，賣壓極輕。這種情況趨勢往往能維持或進入橫盤，雖然不宜追高，但對於持股者而言是籌碼安定的正面訊號。
+                                                    {detail}
                                                 </div>
                                             )}
                                         </div>
