@@ -13,6 +13,7 @@ export default function SmartNavigatorPage() {
     const [error, setError] = useState<string | null>(null);
     const [result, setResult] = useState<any>(null);
     const [showDetails, setShowDetails] = useState(false);
+    const [activeTooltip, setActiveTooltip] = useState<string | null>(null);
 
     const handleSearch = async () => {
         if (!stockId) return;
@@ -189,12 +190,33 @@ export default function SmartNavigatorPage() {
                                 主力動態白話解讀
                             </div>
                             <div className="space-y-4">
-                                {result.interpretations.map((text: string, idx: number) => (
-                                    <div key={idx} className="flex gap-3 bg-black/40 p-4 rounded-xl border border-white/5">
-                                        <div className="text-indigo-400 mt-0.5">•</div>
-                                        <div className="text-slate-300 font-medium leading-relaxed">{text}</div>
-                                    </div>
-                                ))}
+                                {result.interpretations.map((text: string, idx: number) => {
+                                    const isTargetText = text.includes('高位量縮，籌碼相對穩定');
+                                    return (
+                                        <div key={idx} className="relative flex flex-col bg-black/40 p-4 rounded-xl border border-white/5">
+                                            <div className="flex gap-3">
+                                                <div className="text-indigo-400 mt-0.5">•</div>
+                                                <div className="text-slate-300 font-medium leading-relaxed flex items-center gap-2 flex-wrap">
+                                                    {text}
+                                                    {isTargetText && (
+                                                        <button 
+                                                            onClick={() => setActiveTooltip(activeTooltip === text ? null : text)}
+                                                            className="text-indigo-400 hover:text-white transition-colors inline-flex"
+                                                        >
+                                                            <HelpCircle className="w-4 h-4" />
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            </div>
+                                            {activeTooltip === text && isTargetText && (
+                                                <div className="mt-3 p-4 bg-indigo-500/10 border border-indigo-500/20 rounded-lg text-xs text-slate-300 leading-loose animate-in slide-in-from-top-2 duration-300">
+                                                    <div className="text-white font-bold mb-1">💡 專家解讀：</div>
+                                                    高位量縮代表股價雖處於近期高點，但成交量卻縮小（想賣的人更少），顯示主力惜售，賣壓極輕。這種情況趨勢往往能維持或進入橫盤，雖然不宜追高，但對於持股者而言是籌碼安定的正面訊號。
+                                                </div>
+                                            )}
+                                        </div>
+                                    );
+                                })}
                             </div>
                         </div>
 
