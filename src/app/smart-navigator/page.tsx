@@ -12,6 +12,7 @@ export default function SmartNavigatorPage() {
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [result, setResult] = useState<any>(null);
+    const [showDetails, setShowDetails] = useState(false);
 
     const handleSearch = async () => {
         if (!stockId) return;
@@ -110,8 +111,44 @@ export default function SmartNavigatorPage() {
                     <div className="animate-in fade-in slide-in-from-bottom-8 duration-700 space-y-6">
                         
                         {/* Traffic Light */}
-                        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-2xl flex flex-col items-center justify-center">
-                            <div className="text-slate-400 font-black mb-6 tracking-widest text-sm">目前狀態燈號</div>
+                        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-2xl flex flex-col items-center justify-center relative overflow-hidden">
+                            <div className="flex items-center gap-2 mb-6">
+                                <div className="text-slate-400 font-black tracking-widest text-sm uppercase">目前狀態燈號</div>
+                                <button 
+                                    onClick={() => setShowDetails(!showDetails)}
+                                    className="text-slate-500 hover:text-indigo-400 transition-colors"
+                                >
+                                    <HelpCircle className="w-4 h-4" />
+                                </button>
+                            </div>
+
+                            {showDetails && (
+                                <div className="absolute inset-0 bg-slate-900/95 z-10 p-6 flex flex-col overflow-y-auto animate-in fade-in duration-300">
+                                    <div className="flex justify-between items-center mb-4">
+                                        <h3 className="text-indigo-400 font-bold text-lg">燈號判定標準</h3>
+                                        <button onClick={() => setShowDetails(false)} className="text-slate-400 hover:text-white">
+                                            <ArrowLeft className="w-5 h-5" />
+                                        </button>
+                                    </div>
+                                    <div className="space-y-4 text-sm text-slate-300">
+                                        <div>
+                                            <p className="text-white font-bold mb-1">【核心大前提】</p>
+                                            <ul className="list-disc list-inside space-y-1 opacity-80">
+                                                <li>站穩月線：股價必須在 20MA 之上。</li>
+                                                <li>非高檔區：股價位階 (Position %) 必須低於 70%。</li>
+                                            </ul>
+                                        </div>
+                                        <div>
+                                            <p className="text-emerald-400 font-bold mb-1">【綠燈觸發情境】</p>
+                                            <ul className="list-disc list-inside space-y-1 opacity-80">
+                                                <li>低檔轉強：位階 &lt; 30% 且換手率 &gt; 5%。</li>
+                                                <li>中檔突破：位階 30-70% 且換手率 &gt; 5%。</li>
+                                            </ul>
+                                        </div>
+                                        <p className="text-rose-400 text-xs italic">* 註：若跌破 20MA 或位階過高，系統會強制顯示紅燈或黃燈警示。</p>
+                                    </div>
+                                </div>
+                            )}
                             <div className="flex gap-4 p-4 bg-black/40 rounded-full border border-white/5 mb-6">
                                 <div className={`w-12 h-12 rounded-full border-2 ${result.light === 'red' ? lightColors.red + ' border-rose-300' : 'bg-slate-800 border-slate-700 opacity-30'} transition-all duration-500`} />
                                 <div className={`w-12 h-12 rounded-full border-2 ${result.light === 'yellow' ? lightColors.yellow + ' border-amber-300' : 'bg-slate-800 border-slate-700 opacity-30'} transition-all duration-500`} />
