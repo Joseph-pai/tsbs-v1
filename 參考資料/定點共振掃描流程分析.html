@@ -1,0 +1,1131 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>定點共振掃描 — 執行流程分析</title>
+  <style>
+    :root {
+      --bg: #0a0f1e;
+      --surface: #111827;
+      --border: #1e2d45;
+      --blue: #3b82f6;
+      --blue-dim: #1d4ed8;
+      --amber: #f59e0b;
+      --green: #10b981;
+      --purple: #8b5cf6;
+      --rose: #f43f5e;
+      --slate: #64748b;
+      --text: #e2e8f0;
+      --text-dim: #94a3b8;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      padding: 40px 20px;
+      line-height: 1.6;
+    }
+
+    h1 {
+      text-align: center;
+      font-size: 2rem;
+      font-weight: 900;
+      background: linear-gradient(135deg, #fff, #3b82f6);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 6px;
+    }
+
+    .subtitle {
+      text-align: center;
+      color: var(--text-dim);
+      margin-bottom: 40px;
+      font-size: 0.9rem;
+    }
+
+    .container {
+      max-width: 960px;
+      margin: 0 auto;
+    }
+
+    .flowchart {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0;
+      margin-bottom: 60px;
+    }
+
+    .flow-node {
+      width: 100%;
+      max-width: 680px;
+      border-radius: 16px;
+      padding: 18px 24px;
+      border: 2px solid;
+      position: relative;
+      transition: transform .2s;
+    }
+
+    .flow-node:hover {
+      transform: scale(1.01);
+    }
+
+    .node-label {
+      font-size: 0.7rem;
+      font-weight: 700;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+      opacity: .7;
+    }
+
+    .node-title {
+      font-size: 1.05rem;
+      font-weight: 800;
+      margin-bottom: 4px;
+    }
+
+    .node-desc {
+      font-size: 0.82rem;
+      color: var(--text-dim);
+      line-height: 1.5;
+    }
+
+    .node-trigger {
+      background: #0f172a;
+      border-color: var(--blue);
+    }
+
+    .node-frontend {
+      background: #0f1f35;
+      border-color: #2563eb;
+    }
+
+    .node-api {
+      background: #1a0f35;
+      border-color: var(--purple);
+    }
+
+    .node-data {
+      background: #1a1a0f;
+      border-color: var(--amber);
+    }
+
+    .node-score {
+      background: #1a0f18;
+      border-color: var(--rose);
+    }
+
+    .node-result {
+      background: #0f1f1a;
+      border-color: var(--green);
+    }
+
+    .node-save {
+      background: #1a150f;
+      border-color: var(--amber);
+    }
+
+    .node-error {
+      background: #1a0f0f;
+      border-color: var(--rose);
+    }
+
+    .color-blue {
+      color: #60a5fa;
+    }
+
+    .color-purple {
+      color: #a78bfa;
+    }
+
+    .color-green {
+      color: #34d399;
+    }
+
+    .color-amber {
+      color: #fbbf24;
+    }
+
+    .color-rose {
+      color: #fb7185;
+    }
+
+    .flow-arrow {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      margin: 4px 0;
+    }
+
+    .arrow-line {
+      width: 2px;
+      height: 22px;
+      background: linear-gradient(to bottom, var(--border), #3b82f680);
+    }
+
+    .arrow-head {
+      width: 0;
+      height: 0;
+      border-left: 7px solid transparent;
+      border-right: 7px solid transparent;
+      border-top: 10px solid #3b82f680;
+    }
+
+    .arrow-label {
+      font-size: 0.7rem;
+      color: var(--slate);
+      margin: 2px 0 0;
+      font-weight: 600;
+    }
+
+    .flow-branch {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      width: 100%;
+      max-width: 680px;
+    }
+
+    .branch-node {
+      border-radius: 12px;
+      padding: 14px 16px;
+      border: 2px dashed;
+    }
+
+    .branch-yes {
+      border-color: var(--green);
+      background: #0f2a1a;
+    }
+
+    .branch-no {
+      border-color: var(--rose);
+      background: #1a0f0f;
+    }
+
+    .branch-tag {
+      font-size: 0.7rem;
+      font-weight: 800;
+      letter-spacing: 1px;
+      margin-bottom: 4px;
+    }
+
+    .branch-yes .branch-tag {
+      color: var(--green);
+    }
+
+    .branch-no .branch-tag {
+      color: var(--rose);
+    }
+
+    .loop-box {
+      width: 100%;
+      max-width: 680px;
+      border: 2px dashed #8b5cf640;
+      border-radius: 16px;
+      padding: 16px;
+      background: #12082a40;
+    }
+
+    .loop-label {
+      font-size: 0.7rem;
+      font-weight: 700;
+      color: var(--purple);
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      margin-bottom: 10px;
+      text-align: center;
+    }
+
+    .score-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.82rem;
+      margin-top: 10px;
+    }
+
+    .score-table th {
+      background: rgba(255, 255, 255, .05);
+      padding: 8px 12px;
+      text-align: left;
+      font-weight: 700;
+      color: var(--text-dim);
+    }
+
+    .score-table td {
+      padding: 8px 12px;
+      border-top: 1px solid var(--border);
+    }
+
+    .section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 28px 32px;
+      margin-bottom: 24px;
+    }
+
+    .section-title {
+      font-size: 1.1rem;
+      font-weight: 800;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .badge {
+      font-size: 0.65rem;
+      font-weight: 700;
+      letter-spacing: 1px;
+      padding: 2px 8px;
+      border-radius: 99px;
+      flex-shrink: 0;
+    }
+
+    .badge-blue {
+      background: #1d4ed840;
+      color: #60a5fa;
+      border: 1px solid #3b82f640;
+    }
+
+    .badge-purple {
+      background: #6d28d940;
+      color: #a78bfa;
+      border: 1px solid #8b5cf640;
+    }
+
+    .badge-green {
+      background: #065f4640;
+      color: #34d399;
+      border: 1px solid #10b98140;
+    }
+
+    .badge-amber {
+      background: #92400e40;
+      color: #fbbf24;
+      border: 1px solid #f59e0b40;
+    }
+
+    .badge-rose {
+      background: #9f123940;
+      color: #fb7185;
+      border: 1px solid #f43f5e40;
+    }
+
+    .step-list {
+      list-style: none;
+      counter-reset: step-counter;
+    }
+
+    .step-list li {
+      counter-increment: step-counter;
+      padding: 10px 0 10px 40px;
+      border-bottom: 1px solid var(--border);
+      position: relative;
+      font-size: 0.88rem;
+    }
+
+    .step-list li:last-child {
+      border-bottom: none;
+    }
+
+    .step-list li::before {
+      content: counter(step-counter);
+      position: absolute;
+      left: 0;
+      top: 10px;
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: var(--blue-dim);
+      color: white;
+      font-size: 0.7rem;
+      font-weight: 800;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .step-list li strong {
+      color: var(--text);
+    }
+
+    .code {
+      font-family: monospace;
+      font-size: 0.8rem;
+      color: #93c5fd;
+      background: rgba(59, 130, 246, .1);
+      padding: 1px 5px;
+      border-radius: 4px;
+    }
+
+    .tag-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 10px;
+    }
+
+    .tag {
+      font-size: 0.7rem;
+      font-weight: 700;
+      padding: 3px 10px;
+      border-radius: 99px;
+      border: 1px solid;
+    }
+
+    .tag-blue {
+      color: #60a5fa;
+      border-color: #3b82f640;
+      background: #1d4ed820;
+    }
+
+    .tag-amber {
+      color: #fbbf24;
+      border-color: #f59e0b40;
+      background: #92400e20;
+    }
+
+    .tag-green {
+      color: #34d399;
+      border-color: #10b98140;
+      background: #065f4620;
+    }
+
+    .tag-purple {
+      color: #a78bfa;
+      border-color: #8b5cf640;
+      background: #6d28d920;
+    }
+
+    .tag-rose {
+      color: #fb7185;
+      border-color: #f43f5e40;
+      background: #9f123920;
+    }
+
+    footer {
+      text-align: center;
+      color: var(--slate);
+      font-size: 0.75rem;
+      margin-top: 40px;
+      padding-top: 20px;
+      border-top: 1px solid var(--border);
+    }
+
+    /* ── 漏斗篩選說明 ── */
+    .funnel {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0;
+      margin: 20px 0;
+    }
+
+    .funnel-step {
+      width: 100%;
+      border-radius: 14px;
+      padding: 16px 22px;
+      border: 2px solid;
+      margin-bottom: 0;
+    }
+
+    .funnel-step-title {
+      font-size: 1rem;
+      font-weight: 800;
+      margin-bottom: 6px;
+    }
+
+    .funnel-step-desc {
+      font-size: 0.82rem;
+      color: var(--text-dim);
+      line-height: 1.6;
+    }
+
+    .funnel-arrow-wrap {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 6px 0;
+    }
+
+    .funnel-arrow-line {
+      width: 2px;
+      height: 18px;
+      background: #3b82f660;
+    }
+
+    .funnel-arrow-head {
+      width: 0;
+      height: 0;
+      border-left: 8px solid transparent;
+      border-right: 8px solid transparent;
+      border-top: 12px solid #3b82f660;
+    }
+
+    .funnel-arrow-label {
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: #60a5fa;
+      margin-top: 3px;
+      letter-spacing: .5px;
+    }
+
+    .funnel-count {
+      display: inline-block;
+      font-size: 1.3rem;
+      font-weight: 900;
+      padding: 2px 14px;
+      border-radius: 99px;
+      margin-bottom: 6px;
+    }
+
+    .count-all {
+      background: #1d4ed840;
+      color: #60a5fa;
+      border: 1px solid #3b82f660;
+    }
+
+    .count-200 {
+      background: #92400e40;
+      color: #fbbf24;
+      border: 1px solid #f59e0b60;
+    }
+
+    .count-pass {
+      background: #6d28d940;
+      color: #a78bfa;
+      border: 1px solid #8b5cf660;
+    }
+
+    .count-final {
+      background: #065f4640;
+      color: #34d399;
+      border: 1px solid #10b98160;
+    }
+
+    .note-box {
+      background: rgba(59, 130, 246, .07);
+      border: 1px solid #3b82f630;
+      border-radius: 12px;
+      padding: 14px 18px;
+      margin-top: 14px;
+      font-size: 0.83rem;
+      line-height: 1.7;
+    }
+
+    .note-box strong {
+      color: var(--text);
+    }
+
+    .compare-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+      margin-top: 14px;
+    }
+
+    .compare-card {
+      border-radius: 12px;
+      padding: 14px 16px;
+      border: 2px solid;
+    }
+
+    .compare-card-title {
+      font-size: 0.8rem;
+      font-weight: 800;
+      margin-bottom: 8px;
+    }
+
+    .compare-card ul {
+      padding-left: 0;
+      list-style: none;
+      font-size: 0.8rem;
+      color: var(--text-dim);
+      line-height: 1.8;
+    }
+
+    .compare-card ul li::before {
+      content: "· ";
+    }
+
+    .card-yesterday {
+      border-color: #10b98140;
+      background: #065f4620;
+    }
+
+    .card-yesterday .compare-card-title {
+      color: #34d399;
+    }
+
+    .card-today {
+      border-color: #f59e0b40;
+      background: #92400e20;
+    }
+
+    .card-today .compare-card-title {
+      color: #fbbf24;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <h1>🔥 啟動定點共振掃描</h1>
+    <p class="subtitle">Stock-Pro · 執行流程分析文件 · 2026-03-05</p>
+
+    <div class="flowchart">
+
+      <!-- 觸發 -->
+      <div class="flow-node node-trigger">
+        <div class="node-label color-blue">觸發點 · page.tsx</div>
+        <div class="node-title color-blue">🖱 使用者點擊「啟動定點共振掃描」按鈕</div>
+        <div class="node-desc">Button onClick → <span class="code">runScan()</span> 被呼叫<br>
+          前置條件：已選定「指定市場（TWSE/TPEX）」與「產業類型（sector）」，可選配置三個信號閾值</div>
+      </div>
+      <div class="flow-arrow">
+        <div class="arrow-line"></div>
+        <div class="arrow-head"></div>
+      </div>
+
+      <!-- 前端初始化 -->
+      <div class="flow-node node-frontend">
+        <div class="node-label color-blue">前端狀態初始化 · runScan()</div>
+        <div class="node-title color-blue">① 畫面進入「fetching」狀態</div>
+        <div class="node-desc">
+          · <span class="code">setStage('fetching')</span> → 按鈕顯示旋轉 Loader，禁用再次點擊<br>
+          · 清空舊結果、錯誤訊息、已掃描旗標<br>
+          · 記錄開始時間 <span class="code">t0 = Date.now()</span>
+        </div>
+      </div>
+      <div class="flow-arrow">
+        <div class="arrow-line"></div>
+        <div class="arrow-head"></div>
+        <div class="arrow-label">Phase 1 — Directed Fetch</div>
+      </div>
+
+      <!-- 快照 API -->
+      <div class="flow-node node-api">
+        <div class="node-label color-purple">API 呼叫 · /api/market/snapshot</div>
+        <div class="node-title color-purple">② 取得市場快照（Stock Snapshot）</div>
+        <div class="node-desc">
+          · 請求參數：<span class="code">market</span>、<span class="code">sector</span>、<span
+            class="code">refresh?</span><br>
+          · Redis 快取鍵：<span class="code">tsbs:snap:v2:{market}:{sector}</span>，TTL = 1 小時
+        </div>
+      </div>
+      <div class="flow-arrow">
+        <div class="arrow-line"></div>
+        <div class="arrow-head"></div>
+        <div class="arrow-label">快取命中？</div>
+      </div>
+      <div class="flow-branch">
+        <div class="branch-node branch-yes">
+          <div class="branch-tag">✅ HIT — 直接回傳 Redis 資料</div>
+          <div style="font-size:.82rem;color:#94a3b8">不呼叫交易所 API</div>
+        </div>
+        <div class="branch-node branch-no">
+          <div class="branch-tag">❌ MISS — 呼叫 ExchangeClient</div>
+          <div style="font-size:.82rem;color:#94a3b8">
+            · sector=ALL → <span class="code">getAllMarketQuotes()</span><br>
+            · 指定類股 → <span class="code">getQuotesBySector()</span><br>
+            → 寫入 Redis (TTL 1h)
+          </div>
+        </div>
+      </div>
+      <div class="flow-arrow">
+        <div class="arrow-line"></div>
+        <div class="arrow-head"></div>
+        <div class="arrow-label">Phase 2 — Candidate Filtering</div>
+      </div>
+
+      <!-- 前端篩選 -->
+      <div class="flow-node node-frontend">
+        <div class="node-label color-blue">前端篩選 · setStage('filtering')</div>
+        <div class="node-title color-blue">③ 候選股票快速預篩（前端邏輯）</div>
+        <div class="node-desc">
+          · 有成交量（<span class="code">Trading_Volume &gt; 0</span>）且非崩跌（<span class="code">spread &gt;= -0.1</span>）<br>
+          · 若輸入 4 位數字 ID → 強制將目標股置頂<br>
+          · 依成交量排序，上限 <strong>200 支</strong>作為批次輸入
+        </div>
+      </div>
+      <div class="flow-arrow">
+        <div class="arrow-line"></div>
+        <div class="arrow-head"></div>
+        <div class="arrow-label">Phase 3 — Batched Resonance Analysis</div>
+      </div>
+
+      <!-- 批次迴圈 -->
+      <div class="loop-box">
+        <div class="loop-label">🔁 每批 25 支，逐批呼叫 POST /api/scan/analyze</div>
+        <div class="flowchart" style="margin-bottom:0">
+
+          <div class="flow-node node-api" style="max-width:100%">
+            <div class="node-label color-purple">API 路由 · /api/scan/analyze (POST)</div>
+            <div class="node-title color-purple">④ 批次深度分析（每組最多 25 支）</div>
+            <div class="node-desc">
+              · 預先抓取產業對應表（<span class="code">ExchangeClient.getIndustryMapping()</span>）<br>
+              · 內部再分 15 支一組並發執行（<span class="code">Promise.allSettled</span>）<br>
+              · 呼叫核心：<span class="code">ScannerService.analyzeStock()</span>
+            </div>
+          </div>
+          <div class="flow-arrow">
+            <div class="arrow-line"></div>
+            <div class="arrow-head"></div>
+          </div>
+
+          <div class="flow-node node-data" style="max-width:100%">
+            <div class="node-label color-amber">ScannerService · analyzeStock()</div>
+            <div class="node-title color-amber">⑤ 四項原始資料抓取（各有 Redis 快取）</div>
+            <table class="score-table">
+              <thead>
+                <tr>
+                  <th>資料項目</th>
+                  <th>主要來源</th>
+                  <th>備援</th>
+                  <th>快取 TTL</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>📈 股價歷史 60天</td>
+                  <td>FinMind API</td>
+                  <td>ExchangeClient</td>
+                  <td>4h</td>
+                </tr>
+                <tr>
+                  <td>🏦 法人買賣超 10天</td>
+                  <td>FinMind API</td>
+                  <td>—</td>
+                  <td>4h</td>
+                </tr>
+                <tr>
+                  <td>💰 月營收 400天</td>
+                  <td>FinMind Extras</td>
+                  <td>—</td>
+                  <td>12h</td>
+                </tr>
+                <tr>
+                  <td>📊 融資融券 10天</td>
+                  <td>FinMind Extras</td>
+                  <td>—</td>
+                  <td>4h</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="flow-arrow">
+            <div class="arrow-line"></div>
+            <div class="arrow-head"></div>
+          </div>
+
+          <div class="flow-node node-score" style="max-width:100%">
+            <div class="node-label color-rose">engine.ts · evaluateStock() → 五維評分引擎</div>
+            <div class="node-title color-rose">⑥ 技術指標計算 + 五維綜合評分（0~100分）</div>
+            <table class="score-table">
+              <thead>
+                <tr>
+                  <th>維度</th>
+                  <th>指標</th>
+                  <th>計算方式</th>
+                  <th>滿分</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td class="color-amber">❶ 量能 Volume</td>
+                  <td>V-Ratio</td>
+                  <td>當日量 ÷ 前45日均量</td>
+                  <td>30</td>
+                </tr>
+                <tr>
+                  <td class="color-purple">❷ 均線 MA</td>
+                  <td>MA Gap 糾結度</td>
+                  <td>|MA5-MA20| ÷ MA20 &lt; 閾值</td>
+                  <td>22</td>
+                </tr>
+                <tr>
+                  <td class="color-blue">❸ 籌碼 Chip</td>
+                  <td>投信連買天數</td>
+                  <td>連買天數 ÷ 5，上限 30%</td>
+                  <td>22</td>
+                </tr>
+                <tr>
+                  <td class="color-green">❹ 融資 Margin</td>
+                  <td>融資軋空信號</td>
+                  <td>近5日融資增 + 股價同步上升</td>
+                  <td>11</td>
+                </tr>
+                <tr>
+                  <td class="color-rose">❺ 基本面 Fund.</td>
+                  <td>月營收 MoM+YoY+新高</td>
+                  <td>月增率+年增率+6月新高加成</td>
+                  <td>15</td>
+                </tr>
+              </tbody>
+            </table>
+            <div style="margin-top:10px;font-size:.8rem;color:#94a3b8">
+              ✦ 多頭排列（MA5 &gt; MA20）→ 均線分 × 1.2 獎勵 ｜ 空頭排列 → 均線分 × 0.5 懲罰
+            </div>
+          </div>
+
+        </div>
+      </div><!-- /loop-box -->
+
+      <div class="flow-arrow">
+        <div class="arrow-line"></div>
+        <div class="arrow-head"></div>
+        <div class="arrow-label">所有批次完成後</div>
+      </div>
+
+      <!-- 爆發潛力分 -->
+      <div class="flow-node node-frontend">
+        <div class="node-label color-blue">前端計算 · runScan()</div>
+        <div class="node-title color-blue">⑦ 附加「爆發潛力分」（前端疊加評分）</div>
+        <div class="node-desc">
+          volScore = min(VRatio ÷ 閾值 × 10, 15) · 權重40%<br>
+          priceScore = min(spread_percent × 2, 10) · 權重40%<br>
+          squeezeScore = max(10 - maGap% × 2, 0) · 權重20%
+        </div>
+      </div>
+      <div class="flow-arrow">
+        <div class="arrow-line"></div>
+        <div class="arrow-head"></div>
+      </div>
+
+      <!-- 過濾排序 -->
+      <div class="flow-node node-result">
+        <div class="node-label color-green">結果過濾 · filteredResults</div>
+        <div class="node-title color-green">⑧ 最終結果過濾 + 排序</div>
+        <div class="node-desc">
+          保留條件（符合其一）：<span class="code">is_recommended = true</span> 或 搜尋詞 ≥ 2 字符合<br>
+          後端推薦條件：(finalScore ≥ 0.6 OR 三大信號全中) AND MA5 &gt; MA20<br>
+          排序依據：<span class="code">potential_score（爆發潛力分）</span> 由高到低
+        </div>
+      </div>
+
+      <div class="flow-arrow">
+        <div class="arrow-line"></div>
+        <div class="arrow-head"></div>
+        <div class="arrow-label">有符合結果？</div>
+      </div>
+      <div class="flow-branch">
+        <div class="branch-node branch-yes">
+          <div class="branch-tag">✅ 有結果</div>
+          <div style="font-size:.82rem;color:#94a3b8">
+            ⑨ 顯示 StockCard 列表<br>
+            ⑩ 自動儲存至 localStorage<br>
+            &nbsp;&nbsp;&nbsp;key: <span class="code">tsbs_scan_history</span>（最多50筆）
+          </div>
+        </div>
+        <div class="branch-node branch-no">
+          <div class="branch-tag">❌ 無結果</div>
+          <div style="font-size:.82rem;color:#94a3b8">
+            顯示「未發現完美共振」訊息<br>提示調整均線糾結度閾值
+          </div>
+        </div>
+      </div>
+      <div class="flow-arrow">
+        <div class="arrow-line"></div>
+        <div class="arrow-head"></div>
+      </div>
+
+      <!-- 完成 -->
+      <div class="flow-node node-save">
+        <div class="node-label color-amber">完成 · setStage('complete')</div>
+        <div class="node-title color-amber">⑩ 掃描完成，顯示耗時統計</div>
+        <div class="node-desc">
+          · <span class="code">setHasScanned(true)</span> → 結果區顯示<br>
+          · Footer 顯示 SNAPSHOT / DEEP_AI / SAMPLES 毫秒數<br>
+          · 3 秒後自動 <span class="code">setStage('idle')</span>，按鈕恢復
+        </div>
+      </div>
+
+      <div class="flow-arrow">
+        <div class="arrow-line"></div>
+        <div class="arrow-head"></div>
+        <div class="arrow-label">任何階段發生錯誤</div>
+      </div>
+      <div class="flow-node node-error">
+        <div class="node-label color-rose">例外處理 · catch(e)</div>
+        <div class="node-title color-rose">⚠ 錯誤處理</div>
+        <div class="node-desc">
+          · <span class="code">setError(e.message)</span> → 顯示錯誤訊息 + 「點擊重試」按鈕<br>
+          · <span class="code">setStage('idle')</span> → 按鈕立即恢復
+        </div>
+      </div>
+
+    </div><!-- /flowchart -->
+
+    <!-- ★ 新增：第一批股票如何產生 -->
+    <div class="section">
+      <div class="section-title"><span class="badge badge-blue">第一批股票</span>系統如何從整個市場選出送去分析的那批股票？</div>
+
+      <p style="font-size:.88rem;color:var(--text-dim);margin-bottom:16px;">
+        掃描的第一步不是直接分析所有股票，而是先用<strong style="color:var(--text)">兩道門檻</strong>快速從整個市場「切一刀」，
+        把幾千支股票縮減到最多 200 支，才送去做深度分析。以下是完整漏斗過程：
+      </p>
+
+      <div class="funnel">
+
+        <!-- Step A: 交易所快照 -->
+        <div class="funnel-step" style="border-color:#3b82f640;background:#0f1f35">
+          <div class="funnel-count count-all">全市場 N 支</div>
+          <div class="funnel-step-title" style="color:#60a5fa">📡 Step A：取得整個市場的即時快照</div>
+          <div class="funnel-step-desc">
+            調用 <span class="code">/api/market/snapshot?market=TWSE&amp;sector=ALL</span>，取回整個市場（或指定類股）今日所有股票的即時行情，
+            包含每支股票的：成交量（Trading_Volume）、昨收（prevClose）、今收（close）、漲跌（spread）等欄位。<br><br>
+            ✦ <strong>全市場</strong>：包含該市場（上市或上櫃）的所有代號，約 900~1,000 支。<br>
+            ✦ <strong>特定類股</strong>：指你在下拉選單選擇的「產業類型」，例如：<strong>半導體業、電腦週邊、電子零組件、航運業、生技醫療</strong>等。
+            每個類股的成分股數量不等，通常在 30~200 支之間。<br>
+            ✦ 資料來自 Redis 快取（TTL 1小時）或交易所 API 即時抓取
+          </div>
+        </div>
+
+        <div class="funnel-arrow-wrap">
+          <div class="funnel-arrow-line"></div>
+          <div class="funnel-arrow-head"></div>
+          <div class="funnel-arrow-label">門檻一：排除無效股票</div>
+        </div>
+
+        <!-- Step B: 兩條件過濾 -->
+        <div class="funnel-step" style="border-color:#f59e0b40;background:#1a1a0f">
+          <div class="funnel-step-title" style="color:#fbbf24">🔍 Step B：兩條件過濾（程式碼邏輯）</div>
+          <div class="funnel-step-desc">
+            <strong style="color:var(--text)">條件一：成交量 &gt; 0</strong>（<span class="code">s.Trading_Volume &gt;
+              0</span>）<br>
+            → 排除今日完全沒有成交的股票（停牌、無人交易等），這類股不具備分析意義。<br><br>
+            <strong style="color:var(--text)">條件二：跌幅不低於 -0.1%</strong>（<span class="code">s.spread &gt;=
+              -0.1</span>）<br>
+            → 排除今日已在大幅崩跌的股票。系統策略是「找爆發股」，崩跌股即使之後分析通過也不推薦進場。
+          </div>
+          <div class="note-box">
+            💡 <strong>為什麼 -0.1 而不是 0？</strong><br>
+            給予極小幅度的容錯空間（-0.1 ≈ 幾乎持平），避免因計算誤差把「今日微跌 0.05%」的好股票也排除掉。
+          </div>
+        </div>
+
+        <div class="funnel-arrow-wrap">
+          <div class="funnel-arrow-line"></div>
+          <div class="funnel-arrow-head"></div>
+          <div class="funnel-arrow-label">依成交量由大到小排序</div>
+        </div>
+
+        <!-- Step C: 取前200 -->
+        <div class="funnel-step" style="border-color:#8b5cf640;background:#12082a40">
+          <div class="funnel-count count-200">最多 200 支</div>
+          <div class="funnel-step-title" style="color:#a78bfa">📊 Step C：依成交量排序，取前 200 支</div>
+          <div class="funnel-step-desc">
+            過濾後剩餘的股票按<strong style="color:var(--text)">今日成交量由大到小排序</strong>，然後用 <span class="code">.slice(0, 200)</span>
+            只取前 200 支。<br><br>
+            ✦ 成交量越大 → 市場關注度越高 → 爆量信號越有意義<br>
+            ✦ 200 是「硬上限」，不是「固定值」——如果過濾後只剩 95 支，就只送 95 支去分析<br>
+            ✦ 如果你輸入了 4 位數字股票代號（如：2330），該股強制置頂排在第一位
+          </div>
+        </div>
+
+        <div class="funnel-arrow-wrap">
+          <div class="funnel-arrow-line"></div>
+          <div class="funnel-arrow-head"></div>
+          <div class="funnel-arrow-label">送去深度分析（Phase 3）</div>
+        </div>
+
+        <!-- Step D: 深度分析 -->
+        <div class="funnel-step" style="border-color:#10b98140;background:#0f1f1a">
+          <div class="funnel-step-title" style="color:#34d399">🔬 Step D：五維深度分析 → 最終推薦</div>
+          <div class="funnel-step-desc">
+            每支股票都走完完整的五維評分（量能30＋均線22＋法人22＋融資11＋營收15），
+            同時必須<strong style="color:var(--text)">同時滿足三大信號共振</strong>或<strong style="color:var(--text)">綜合評分 ≥ 60
+              分</strong>，
+            且 MA5 &gt; MA20（多頭排列），才會被標記為 <span class="code">is_recommended = true</span>。
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ★ 新增：昨天200 vs 今天95，3支如何篩出 -->
+    <div class="section">
+      <div class="section-title"><span class="badge badge-amber">昨天 200 vs 今天 95</span>為什麼候選數量每天不同？最後 3 支是怎麼篩出來的？</div>
+
+      <p style="font-size:.88rem;color:var(--text-dim);margin-bottom:16px;">
+        「200」只是程式設定的<strong style="color:var(--text)">上限天花板</strong>，實際送去分析的數量取決於當天市場有多少股票通過 Step B 的兩條門檻。
+      </p>
+
+      <div class="compare-grid">
+        <div class="compare-card card-yesterday">
+          <div class="compare-card-title">✅ 昨天：通過 200 支（達到上限）</div>
+          <ul>
+            <li>市場整體氣氛較佳，大多數股票有成交量</li>
+            <li>崩跌（spread &lt; -0.1）的股票少</li>
+            <li>快照中 的合格股 ≥ 200，取前200截斷</li>
+            <li>結果：系統送了 200 支去深度分析</li>
+          </ul>
+        </div>
+        <div class="compare-card card-today">
+          <div class="compare-card-title">⚠️ 今天：只有 95 支（未達上限）</div>
+          <ul>
+            <li>市場整體偏弱，更多股票崩跌被過濾</li>
+            <li>或選擇了特定類股，本身股票數量少</li>
+            <li>或今日交投冷清，零成交股票增加</li>
+            <li>結果：合格股只有 95 支，全部送去分析</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="note-box" style="margin-top:16px">
+        <strong>常見原因一覽：</strong><br>
+        ① <strong>選擇了特定類股</strong>（非全市場）→ 該類股本身只有幾十支，過了條件後自然少<br>
+        ② <strong>大盤弱勢日</strong> → 大量股票跌幅超過 -0.1%，被門檻二排除<br>
+        ③ <strong>非交易活躍時段</strong> → 零成交股增加，被門檻一排除<br>
+        ④ <strong>Redis 快取是舊資料</strong>（TTL 1小時內未過期）→ 快照反映的是最近一次更新的行情，若市場變化快也可能有差異
+      </div>
+
+      <div style="margin-top:24px">
+        <div class="section-title" style="font-size:1rem;margin-bottom:14px">
+          <span class="badge badge-green">三層漏斗</span>95 支候選股如何最終縮減到 3 支推薦結果
+        </div>
+
+        <div class="funnel">
+          <div class="funnel-step" style="border-color:#3b82f640;background:#0f1f35">
+            <div class="funnel-count count-all">95 支（今日候選stock pool）</div>
+            <div class="funnel-step-title" style="color:#60a5fa">第一層：市場快照 + 成交量/跌幅預篩</div>
+            <div class="funnel-step-desc">
+              已通過「有成交量」＋「非崩跌（≥ -0.1%）」兩條門檻 → 95 支合格進入深度分析隊列
+            </div>
+          </div>
+
+          <div class="funnel-arrow-wrap">
+            <div class="funnel-arrow-line"></div>
+            <div class="funnel-arrow-head"></div>
+            <div class="funnel-arrow-label">深度分析（五維評分）</div>
+          </div>
+
+          <div class="funnel-step" style="border-color:#8b5cf640;background:#12082a40">
+            <div class="funnel-count count-pass">假設通過評分：約 5~20 支</div>
+            <div class="funnel-step-title" style="color:#a78bfa">第二層：五維綜合評分 ≥ 60分 OR 三大信號全中</div>
+            <div class="funnel-step-desc">
+              每支股票需抓取 60 天股價歷史、法人資料、月營收、融資數據，計算五維分數。<br>
+              <strong style="color:var(--text)">通過條件（AND 邏輯，需同時滿足）：</strong><br>
+              ✦ （finalScore ≥ 0.6）<strong> 或 </strong>（V-Ratio ≥ 3.5x <strong>且</strong> MA Gap ≤ 2% <strong>且</strong>
+              今日漲幅 ≥ 3%）<br>
+              ✦ MA5 &gt; MA20（多頭排列，兩者均需成立才能 is_recommended = true）<br><br>
+              這一層是<strong style="color:var(--text)">最嚴格的淘汰關卡</strong>，通常只有 5~30% 的候選股能通過
+            </div>
+          </div>
+
+          <div class="funnel-arrow-wrap">
+            <div class="funnel-arrow-line"></div>
+            <div class="funnel-arrow-head"></div>
+            <div class="funnel-arrow-label">前端附加爆發潛力分排序</div>
+          </div>
+
+          <div class="funnel-step" style="border-color:#10b98140;background:#0f1f1a">
+            <div class="funnel-count count-final">最終 3 支（顯示結果）</div>
+            <div class="funnel-step-title" style="color:#34d399">第三層：爆發潛力分排名（前端排序）</div>
+            <div class="funnel-step-desc">
+              通過第二層的股票，前端再計算「爆發潛力分」（volScore + priceScore + squeezeScore），
+              由高到低排列，<strong style="color:var(--text)">全部顯示</strong>（不限數量）。<br><br>
+              ✦ 今天顯示 3 支，代表只有 3 支同時滿足：五維評分門檻 + 多頭排列<br>
+              ✦ 不是「只取前3」，而是「只有3支通過了所有條件」<br>
+              ✦ 若全市場氣氛強勁，可能找到 10~20 支；若氣氛弱，可能 0 支
+            </div>
+          </div>
+        </div>
+
+        <div class="note-box">
+          <strong>📌 總結：為什麼結果股數每天都不一樣？</strong><br>
+          因為整個系統沒有「強制取 N 支」的邏輯——每一層都是<strong>條件過濾</strong>，不是「取樣」。
+          結果數量完全由當天市場的技術指標狀態決定：<br>
+          · 大盤強勢、成交量放大 → 通過門檻的股票多 → 結果多<br>
+          · 大盤弱勢、量縮震盪 → 符合「量能激增 + 均線糾結 + 技術突破」的股票少 → 結果少甚至為 0<br>
+          · 這正是系統設計的核心哲學：<strong>「寧缺毋濫，只顯示真正共振的標的」</strong>
+        </div>
+      </div>
+    </div>
+
+    <!-- 文字說明 -->
+    <div class="section">
+      <div class="section-title"><span class="badge badge-blue">STEP BY STEP</span>完整執行步驟文字說明</div>
+      <ol class="step-list">
+        <li><strong>使用者觸發</strong>：點擊按鈕，<span class="code">onClick={() => runScan()}</span> 觸發；執行期間按鈕禁用。</li>
+        <li><strong>前端狀態重置</strong>：<span class="code">setStage('fetching')</span>，清空舊結果/錯誤/旗標，記錄計時起點 t0。</li>
+        <li><strong>呼叫快照 API</strong>：<span class="code">GET /api/market/snapshot?market=&amp;sector=</span>。Redis 快取鍵
+          <span class="code">tsbs:snap:v2:{market}:{sector}</span>（TTL 1h）；未命中則呼叫交易所 API 並回寫 Redis。
+        </li>
+        <li><strong>前端候選預篩</strong>：<span class="code">setStage('filtering')</span>，過濾量能 &gt; 0 且跌幅 &gt; -0.1%，依成交量排序取前
+          200 支。4 位數字搜尋詞時目標股強制置頂。</li>
+        <li><strong>批次送出分析</strong>：<span class="code">setStage('analyzing')</span>，每 25 支一批次迴圈呼叫 <span
+            class="code">POST /api/scan/analyze</span>，同步更新進度條。</li>
+        <li><strong>後端產業對應預取</strong>：<span class="code">analyze/route.ts</span> 一次性取得整批次的產業對應表，避免重複呼叫。</li>
+        <li><strong>並發個股分析</strong>：每批 25 支再分 15 支一組 <span class="code">Promise.allSettled</span> 並發，呼叫 <span
+            class="code">ScannerService.analyzeStock()</span>。</li>
+        <li><strong>四項資料抓取</strong>（均先查 Redis）：① 60天股價歷史（FinMind → Exchange備援，TTL 4h）② 10天法人買賣超（TTL 4h）③ 400天月營收（TTL
+          12h）④ 10天融資融券（TTL 4h）。</li>
+        <li><strong>技術指標計算</strong>（<span class="code">engine.ts / evaluateStock()</span>）：計算 V-Ratio（當日量 ÷
+          前45日均量）、MA5/MA20 糾結度（|MA5-MA20|÷MA20）、今日突破幅度、多/空頭排列。</li>
+        <li><strong>五維綜合評分</strong>：量能(30) + 均線(22) + 籌碼/法人(22) + 融資軋空(11) + 月營收(15) = 最高 100 分，轉換為 0~1 的
+          finalScore。多頭排列均線分 ×1.2，空頭排列 ×0.5。</li>
+        <li><strong>推薦標記</strong>：<span class="code">is_recommended = (finalScore ≥ 0.6 OR 三大信號全中) AND MA5 &gt;
+            MA20</span>。</li>
+        <li><strong>前端爆發潛力分疊加</strong>：額外計算 volScore + priceScore + squeezeScore，作為最終排序依據。</li>
+        <li><strong>最終過濾 + 排序</strong>：只保留 <span class="code">is_recommended=true</span> 或搜尋命中的股票，依 potential_score
+          由高到低排序。</li>
+        <li><strong>結果顯示 + 歷史儲存</strong>：有結果時顯示 StockCard，同時儲存掃描 Session 至 <span
+            class="code">localStorage.tsbs_scan_history</span>（最多 50 筆）。</li>
+        <li><strong>完成狀態</strong>：<span class="code">setStage('complete')</span> → 3 秒後 <span
+            class="code">idle</span>，按鈕恢復，Footer 顯示耗時統計。</li>
+      </ol>
+    </div>
+
+    <div class="section">
+      <div class="section-title"><span class="badge badge-amber">三大信號</span>共振成立條件（預設閾值）</div>
+      <div class="tag-list">
+        <span class="tag tag-amber">❶ 量能激增 V-Ratio ≥ 3.5x（當日量 ÷ 前45日均量）</span>
+        <span class="tag tag-purple">❷ 均線糾結 MA Gap &lt; 2%（|MA5-MA20| ÷ MA20）</span>
+        <span class="tag tag-green">❸ 技術突破 今日漲幅 ≥ 3% 且收盤 &gt; max(MA5, MA20)</span>
+        <span class="tag tag-blue">加分：MA5 &gt; MA20（多頭排列）</span>
+      </div>
+      <div style="margin-top:14px;font-size:.85rem;color:#94a3b8">三個閾值均可在「信號閾值配置」面板調整（量能 1~6x、MA 0.5~5%、突破 1~8%）。</div>
+    </div>
+
+    <div class="section">
+      <div class="section-title"><span class="badge badge-green">結果 Tags</span>系統自動標記的信號標籤</div>
+      <div class="tag-list">
+        <span class="tag tag-blue">DISCOVERY — 基礎分析完成</span>
+        <span class="tag tag-amber">VOLUME_EXPLOSION — V-Ratio ≥ 閾值</span>
+        <span class="tag tag-purple">MA_SQUEEZE — 均線糾結</span>
+        <span class="tag tag-green">BREAKOUT — 技術突破</span>
+        <span class="tag tag-green">BASIC_SUPPORT — 月營收趨勢向上</span>
+        <span class="tag tag-rose">MARGIN_SQUEEZE — 融資軋空信號</span>
+        <span class="tag tag-blue">GAP_UP — 向上跳空</span>
+        <span class="tag tag-amber">REVENUE_NEW_HIGH — 近6月營收新高</span>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title"><span class="badge badge-rose">效能設計</span>快取與效能優化機制</div>
+      <ol class="step-list">
+        <li><strong>Redis 多層快取</strong>：快照、股價歷史、法人資料、月營收、融資資料均有獨立快取 Key 與 TTL，大幅降低對外部 API 重複呼叫。</li>
+        <li><strong>Session Storage（瀏覽器端）</strong>：頁面初始化時快取產業對應表與快照，避免重新整理後重複抓取。</li>
+        <li><strong>批次分析（每批 25 支）</strong>：前端每批送 25 支，後端內部再 15 支並發，兼顧吞吐量與避免504/502超時。</li>
+        <li><strong>候選上限 200 支</strong>：快照通常數百~千支，預先過濾至 200 支，分析時間縮短約3倍。</li>
+        <li><strong>Promise.allSettled</strong>：單支分析失敗不影響整批，確保盡可能多的結果被收集。</li>
+      </ol>
+    </div>
+
+    <footer>Stock-Pro · 定點共振掃描流程分析 · 生成於 2026-03-05 · Joseph PAI</footer>
+  </div>
+</body>
+
+</html>
