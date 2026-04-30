@@ -1,60 +1,45 @@
-# 智能選股導航 (Smart Navigator) Implementation Plan
+# Smart Navigator 錯誤修復與換手率升級計畫
 
-本計劃書描述如何在不影響現有掃描與回測邏輯的前提下，為股票 APP 新增一個獨立的「智能選股導航」功能。
+本計畫針對您回報的 500 錯誤（API 呼叫上限）提供解決方案，並根據稍早的分析結果，提出「真實換手率」的計算修改計畫。
 
-## User Decisions & Assumptions
+## User Review Required
 
-- **換手率計算**：由於 TWSE 與 FinMind 基礎開放 API 未直接提供發行總股數，計畫將採用「近期平均成交量（例如 5MA）」作為基準，計算相對換手熱度（例如：當日量大於 5日均量 2 倍視為高換手），或透過其他已實作邏輯替代。
-- **股價位階計算**：預設使用「近 30 日」的最高/最低價來計算股價位階，但會在前端提供選項讓用戶可以切換：30日、60日、90日、120日。
-- **AI 白話解讀**：不額外串接外部 API，直接在後端依據計算出的數據狀態，套用預設的幾套規則判斷字串（例如：「主力積極換手，底部量增」、「高位爆量，請嚴格執行停損」）。
+> [!WARNING]
+> **500 錯誤原因分析**：
+> 剛才測試確認，`FinMind` 的免費版 API 有嚴格的呼叫頻率限制。當我們一次請求近 200 天的歷史資料時，很容易觸發 `API 402: Requests reach the upper limit` 的錯誤，導致伺服器回傳 500。
+> 
+> **解決方案**：
+> 我們系統內本來就有實作強大的 `ExchangeClient.getStockHistory`（直接從 TWSE/TPEx 抓取資料，繞過 FinMind 限制）。我計畫將 `Smart Navigator` 的底層資料源切換為 `ExchangeClient`，這樣就能徹底解決 API 上限導致的卡頓與 500 錯誤。
 
 ## Proposed Changes
 
----
+### 1. 修復 500 錯誤（切換資料源）
 
-### Frontend UI
+#### [MODIFY] [route.ts](file:///Users/joseph/Downloads/stock-pro-main/src/app/api/smart-navigator/route.ts)
+- **變更內容**：
+  - 將原本依賴 `FinMindClient.getDailyStats` 抓取股價的邏輯，改為使用 `ExchangeClient.getStockHistory(stockId, 6)`。
+  - `ExchangeClient` 會直接向台灣證券交易所與櫃買中心抓取過去 6 個月的日線資料（約 120 個交易日），足以計算 20MA、MACD 以及 120 日位階。
+  - 此改動能**完全避開 FinMind 的 API 限制**，大幅提升功能穩定性。
 
-#### [MODIFY] [page.tsx](file:///Users/joseph/Downloads/stock-pro-main/src/app/page.tsx)
-- **變更內容**：在 APP 主頁（DashboardPage）的 Header 按鈕區塊（現有「使用說明」、「歷史紀錄」、「回測」等按鈕旁邊），新增一個「智能選股導航」按鈕。
-- **UI 設計**：按鈕帶有 `Compass` 或 `Radar` 圖示，並使用明顯的漸層或特殊色彩以提升辨識度。點擊後會透過 `next/navigation` 跳轉至 `/smart-navigator` 獨立頁面。
+### 2. 真實換手率 (Turnover Rate) 計算升級
 
-#### [NEW] [smart-navigator/page.tsx](file:///Users/joseph/Downloads/stock-pro-main/src/app/smart-navigator/page.tsx)
-- **變更內容**：新增一個全新的 Next.js 頁面組件。
-- **UI 設計**：
-  - **區間選擇器**：供使用者選擇計算位階的區間（30日、60日、90日、120日），預設為 30日。
-  - **極簡面板**：隱藏複雜的 K 線與技術指標。
-  - **頂部**：顯示一個直觀的「交通燈號」（綠燈 / 黃燈 / 紅燈）。
-  - **中部**：大字體顯示「智能操作價格」，包括買入建議、停損建議、分批停利建議（第一批與第二批）。
-  - **底部**：顯示「主力動態白話解讀」清單。
+#### [NEW] [shares.ts](file:///Users/joseph/Downloads/stock-pro-main/src/lib/shares.ts) (或整合至 `exchange.ts`)
+- **變更內容**：新增一個專門獲取「發行總股數」的工具函數。
+- **實作細節**：
+  - 實作向 TWSE `MI_QFIIS` (外資及陸資投資持股統計) 與 TPEx 對應端點獲取 `ShareNumber` (總發行股數) 的邏輯。
+  - 考量到官方 Open API 偶爾會不穩定，會加入**記憶體快取 (Cache)** 機制。由於發行股數短期內不會頻繁變動，我們只需在第一次查詢該股票時獲取並暫存即可，避免每次點擊都發送請求。
 
----
-
-### Backend Logic
-
-#### [NEW] [smart-navigator/route.ts](file:///Users/joseph/Downloads/stock-pro-main/src/app/api/smart-navigator/route.ts)
-- **變更內容**：新增專屬的 API endpoint 來處理選股導航的運算。
-- **運算邏輯**：
-  1. 接收前端傳遞的 Stock ID。
-  2. 透過現有的 `FinMindClient.getDailyStats` 抓取近 60 日股價與成交量。
-  3. **計算指標**：
-     - 計算 20MA。
-     - 計算 MACD (DIF, MACD, OSC/Line)。
-     - 取得計算期間（30, 60, 90, 120日）的最高與最低價，計算股價位階（Position %）：`(當日收盤價 - 期間最低價) / (期間最高價 - 期間最低價) * 100%`。
-     - 取得/估算 當日換手熱度（例如比對當日成交量與 5日均量的關係）。
-  4. **狀態定義**：
-     - **綠燈 (低位高換手)**：股價位階 < 30% 且 換手熱度高（如大於5日均量2倍） 且 MACD > 0 且 股價 > 20MA。
-     - **黃燈 (高位低換手)**：股價位階 > 70% 且 換手熱度低 (穩定) 且 MACD > 0 且 股價 > 20MA。
-     - **紅燈 (高位高換手/破線)**：換手熱度極高（爆量） 或 股價 < 20MA。
-  5. **價格建議公式**：
-     - 買入：`(當日最高價 + 當日最低價) / 2`
-     - 停損：`20MA 價格` (或近幾日低點)。
-     - 停利：買入價的 `1.3倍` (30%) 及 `1.7倍` (70%)。
+#### [MODIFY] [route.ts](file:///Users/joseph/Downloads/stock-pro-main/src/app/api/smart-navigator/route.ts)
+- **變更內容**：升級運算邏輯，使用真實換手率取代目前的「相對於 5日均量」。
+- **運算邏輯更新**：
+  1. 呼叫上述新增的函數獲取該股票的 `TotalShares`（發行總股數）。
+  2. 計算真實換手率：`TurnoverRate = (當日成交股數 / TotalShares) * 100%`。（注意：若來源成交量單位為「張」，需轉換為「股」）。
+  3. 更新狀態定義（依據您最初的需求）：
+     - **綠燈**：換手率 > 5%。
+     - **黃燈**：換手率穩定（例如 < 5%）。
+     - **紅燈**：換手率 > 25% (極度爆量)。
 
 ## Verification Plan
-
-### Manual Verification
-1. 在開發環境啟動伺服器 (`npm run dev`)。
-2. 進入首頁檢查「智能選股導航」按鈕是否正常渲染並可點擊。
-3. 跳轉至導航頁面後，輸入測試股票（如 2330），確認是否能正確計算出紅/黃/綠燈號，並展示買入/停損/停利價位。
-4. 檢查顯示介面是否極簡化，不帶有任何複雜技術線圖。
-5. 確認原本的「共振掃描」、「回測」等核心功能完全未受影響。
+1. 修改完成後，在本地端重新點擊 `Smart Navigator` 測試 `2363` 與 `4540`。
+2. 確認是否不再出現 `500 Failed to load resource` 錯誤。
+3. 檢查 API 回傳的資料中，是否成功計算出真實的換手率（例如回傳 `turnoverRate: 5.2%`），並且燈號判斷正確。
