@@ -1,0 +1,5 @@
+- [x] Backup existing files
+- [x] Add "Smart Navigator" button to `src/app/page.tsx`
+- [x] Create `src/app/api/smart-navigator/route.ts` with logic
+- [x] Create `src/app/smart-navigator/page.tsx` with UI
+- [ ] Verify functionality

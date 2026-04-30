@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import { ExchangeClient } from '@/lib/exchange';
-import { getTotalShares } from '@/lib/shares';
+import { FinMindClient } from '@/lib/finmind';
+import { format, subDays } from 'date-fns';
 import { calculateSMA, calculateMACD } from '@/services/indicators';
 
 export async function GET(request: Request) {
@@ -14,42 +14,36 @@ export async function GET(request: Request) {
             return NextResponse.json({ success: false, error: 'Missing stockId' }, { status: 400 });
         }
 
-        // Fetch 6 months of data directly from Exchange to avoid FinMind API limits
-        const prices = await ExchangeClient.getStockHistory(stockId, 6);
+        // Fetch enough data for 120-day position calculation and 26-day MACD/20MA (so around 150 days to be safe)
+        const startDate = format(subDays(new Date(), 200), 'yyyy-MM-dd');
+        const prices = await FinMindClient.getDailyStats({ stockId, startDate });
 
         if (!prices || prices.length === 0) {
-            return NextResponse.json({ success: false, error: '無法獲取該股票的歷史交易數據，請確認代號是否正確。' }, { status: 404 });
+            return NextResponse.json({ success: false, error: '無此股票代號的交易數據' }, { status: 404 });
         }
 
         // Extract close prices and volumes (ordered from oldest to newest)
         const closePrices = prices.map(p => p.close);
-        // Convert Volume back to shares (ExchangeClient returns volume in thousands (張), except TPEx History API sometimes returns shares. 
-        // Wait, ExchangeClient normalizes volume to "thousands (張)" for TWSE, but let's check its logic: 
-        // TWSE daily: `parseNum(row[1]) / 1000`
-        // TPEx daily: `parseNum(row[1])` (Wait, TPEx history returns volume in thousands (仟股)? Yes, `parseNum(row[1])` means thousands. So both are in thousands. We need to multiply by 1000 to get shares).
-        const volumesInShares = prices.map(p => p.Trading_Volume * 1000);
+        const volumes = prices.map(p => p.Trading_Volume);
 
         const latestData = prices[prices.length - 1];
         const latestClose = latestData.close;
         const latestHigh = latestData.max;
         const latestLow = latestData.min;
-        const latestVolumeShares = latestData.Trading_Volume * 1000;
-
-        // Fetch Total Outstanding Shares
-        const totalShares = await getTotalShares(stockId);
-        
-        // Calculate Real Turnover Rate (%)
-        let turnoverRate = 0;
-        if (totalShares && totalShares > 0) {
-            turnoverRate = (latestVolumeShares / totalShares) * 100;
-        }
+        const latestVolume = latestData.Trading_Volume;
 
         // Calculate 20MA
         const reversedClose = [...closePrices].reverse();
         const ma20 = calculateSMA(reversedClose, 20);
 
+        // Calculate 5MA for volume
+        const reversedVolume = [...volumes].reverse();
+        const vol5MA = calculateSMA(reversedVolume, 5);
+
         // Calculate MACD
         const macdData = calculateMACD(closePrices);
+        const macdLine = macdData?.osc ?? 0; // OSC is histogram, dif is MACD line, let's use OSC or DIF > 0
+        // Wait, "MACD Line > 0" usually means DIF > 0 or OSC > 0. Let's use DIF > 0 as MACD > 0 and OSC for crossover
         const isMacdPositive = macdData ? macdData.dif > 0 : false;
 
         // Calculate Position %
@@ -58,21 +52,9 @@ export async function GET(request: Request) {
         const periodMin = Math.min(...periodPrices);
         const positionPercent = periodMax === periodMin ? 0 : ((latestClose - periodMin) / (periodMax - periodMin)) * 100;
 
-        // Calculate Turnover Heat
-        // Fallback to relative volume if totalShares is unavailable
-        let isHighTurnover = false;
-        let isExtremelyHighTurnover = false;
-        
-        if (totalShares && totalShares > 0) {
-            isHighTurnover = turnoverRate > 5; // > 5%
-            isExtremelyHighTurnover = turnoverRate > 25; // > 25%
-        } else {
-            // Fallback: compare to 5MA volume
-            const reversedVolume = [...volumesInShares].reverse();
-            const vol5MA = calculateSMA(reversedVolume, 5);
-            isHighTurnover = vol5MA ? latestVolumeShares > (vol5MA * 2) : false;
-            isExtremelyHighTurnover = vol5MA ? latestVolumeShares > (vol5MA * 4) : false;
-        }
+        // Calculate Turnover Heat (Is volume > 2x 5MA?)
+        const isHighTurnover = vol5MA ? latestVolume > (vol5MA * 2) : false;
+        const isExtremelyHighTurnover = vol5MA ? latestVolume > (vol5MA * 4) : false; // 爆量
 
         // Prices
         const buyPrice = Number(((latestHigh + latestLow) / 2).toFixed(2));
@@ -133,12 +115,6 @@ export async function GET(request: Request) {
             light = 'red';
         }
 
-        if (totalShares && totalShares > 0) {
-            rules.push(`(真實換手率: ${turnoverRate.toFixed(2)}%)`);
-        } else {
-            rules.push(`(因缺少總股本資料，使用5日均量比對換手熱度)`);
-        }
-
         return NextResponse.json({
             success: true,
             data: {
@@ -155,7 +131,6 @@ export async function GET(request: Request) {
                     ma20: ma20 ? Number(ma20.toFixed(2)) : null,
                     positionPercent: Number(positionPercent.toFixed(1)),
                     isHighTurnover,
-                    turnoverRate: turnoverRate > 0 ? Number(turnoverRate.toFixed(2)) : null
                 },
                 interpretations: rules,
             }

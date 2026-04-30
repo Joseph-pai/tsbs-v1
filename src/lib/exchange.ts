@@ -174,53 +174,57 @@ export const ExchangeClient = {
             const allData: StockData[] = [];
 
             for (let i = 0; i < monthsToFetch; i++) {
-                const targetDate = subMonths(new Date(), i);
-                let monthlyData: StockData[] = [];
+                try {
+                    const targetDate = subMonths(new Date(), i);
+                    let monthlyData: StockData[] = [];
 
-                if (!isTPEX) {
-                    // TWSE Logic
-                    const dateStr = format(targetDate, 'yyyyMM01');
-                    const url = `https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date=${dateStr}&stockNo=${stockId}`;
-                    const res = await axios.get(url, { timeout: 10000 });
-                    if (res.data && res.data.data) {
-                        const parseNum = (val: string) => parseFloat(val.replace(/,/g, ''));
-                        monthlyData = res.data.data.map((row: any) => ({
-                            stock_id: stockId,
-                            stock_name: '', // Added to match interface
-                            date: normalizeAnyDate(row[0]),
-                            Trading_Volume: parseNum(row[1]) / 1000,
-                            open: parseNum(row[3]),
-                            max: parseNum(row[4]),
-                            min: parseNum(row[5]),
-                            close: parseNum(row[6]),
-                            spread: 0,
-                            Trading_money: 0,
-                            Trading_turnover: 0
-                        }));
+                    if (!isTPEX) {
+                        // TWSE Logic
+                        const dateStr = format(targetDate, 'yyyyMM01');
+                        const url = `https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date=${dateStr}&stockNo=${stockId}`;
+                        const res = await axios.get(url, { timeout: 10000 });
+                        if (res.data && res.data.data) {
+                            const parseNum = (val: string) => parseFloat(val.replace(/,/g, ''));
+                            monthlyData = res.data.data.map((row: any) => ({
+                                stock_id: stockId,
+                                stock_name: '', // Added to match interface
+                                date: normalizeAnyDate(row[0]),
+                                Trading_Volume: parseNum(row[1]) / 1000,
+                                open: parseNum(row[3]),
+                                max: parseNum(row[4]),
+                                min: parseNum(row[5]),
+                                close: parseNum(row[6]),
+                                spread: 0,
+                                Trading_money: 0,
+                                Trading_turnover: 0
+                            }));
+                        }
+                    } else {
+                        // TPEX Logic
+                        const rocYearMonth = `${targetDate.getFullYear() - 1911}/${format(targetDate, 'MM')}`;
+                        const url = `https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/stk_quote_result.php?l=zh-tw&d=${rocYearMonth}&stkno=${stockId}`;
+                        const res = await axios.get(url, { timeout: 10000 });
+                        if (res.data && res.data.aaData) {
+                            const parseNum = (val: string) => parseFloat(val.replace(/,/g, ''));
+                            monthlyData = res.data.aaData.map((row: any) => ({
+                                stock_id: stockId,
+                                stock_name: '', // Added to match interface
+                                date: normalizeAnyDate(row[0]),
+                                Trading_Volume: parseNum(row[1]),
+                                open: parseNum(row[3]),
+                                max: parseNum(row[4]),
+                                min: parseNum(row[5]),
+                                close: parseNum(row[6]),
+                                spread: 0,
+                                Trading_money: 0,
+                                Trading_turnover: 0
+                            }));
+                        }
                     }
-                } else {
-                    // TPEX Logic
-                    const rocYearMonth = `${targetDate.getFullYear() - 1911}/${format(targetDate, 'MM')}`;
-                    const url = `https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/stk_quote_result.php?l=zh-tw&d=${rocYearMonth}&stkno=${stockId}`;
-                    const res = await axios.get(url, { timeout: 10000 });
-                    if (res.data && res.data.aaData) {
-                        const parseNum = (val: string) => parseFloat(val.replace(/,/g, ''));
-                        monthlyData = res.data.aaData.map((row: any) => ({
-                            stock_id: stockId,
-                            stock_name: '', // Added to match interface
-                            date: normalizeAnyDate(row[0]),
-                            Trading_Volume: parseNum(row[1]),
-                            open: parseNum(row[3]),
-                            max: parseNum(row[4]),
-                            min: parseNum(row[5]),
-                            close: parseNum(row[6]),
-                            spread: 0,
-                            Trading_money: 0,
-                            Trading_turnover: 0
-                        }));
-                    }
+                    allData.push(...monthlyData);
+                } catch (e) {
+                    console.warn(`[Exchange] Failed to fetch month ${i} for ${stockId}, skipping...`);
                 }
-                allData.push(...monthlyData);
             }
 
             // Deduplicate, sort by date ascending
@@ -247,7 +251,7 @@ export const ExchangeClient = {
         ];
         if (knownOTC.includes(stockId)) {
             // Special check: Some like 6508 are actually TWSE, but commonly confusing
-            const forSureTwse = ['6508', '2330', '2317'];
+            const forSureTwse = ['6508', '2330', '2317', '2303', '2454', '2308'];
             if (forSureTwse.includes(stockId)) return false;
             return true;
         }
