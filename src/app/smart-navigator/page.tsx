@@ -391,7 +391,7 @@ export default function SmartNavigatorPage() {
 
                 {/* Input Area */}
                 <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 mb-8 shadow-2xl relative overflow-hidden">
-                    <div className="flex flex-col md:flex-row gap-4 relative z-10">
+                    <div className="flex flex-col md:flex-row flex-wrap gap-4 relative z-10">
                         <input
                             type="text"
                             placeholder="輸入股票代號 (例如: 2330)"
