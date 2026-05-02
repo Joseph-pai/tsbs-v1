@@ -216,15 +216,20 @@ function ResultCard({ result, stockId, stockName }: { result: any, stockId: stri
                         <div className="text-3xl font-black text-indigo-400">{result.prices.buy}</div>
                     </div>
                     <div className="bg-black/40 rounded-2xl p-4 border border-rose-500/20 text-center">
-                        <div className="text-rose-500 font-bold mb-1 text-sm">防守停損</div>
+                        <div className="text-rose-500 font-bold mb-1 text-sm flex flex-col items-center">
+                            <span>防守停損</span>
+                            {result.metrics?.isStopLossFallback && (
+                                <span className="text-[10px] text-rose-500/70 font-normal">(以最新一日最低價計算)</span>
+                            )}
+                        </div>
                         <div className="text-3xl font-black text-rose-400">{result.prices.stopLoss}</div>
                     </div>
                     <div className="bg-black/40 rounded-2xl p-4 border border-emerald-500/20 text-center">
-                        <div className="text-emerald-500 font-bold mb-1 text-sm">第一批停利 (30%)</div>
+                        <div className="text-emerald-500 font-bold mb-1 text-sm">第一批停利 (25%)</div>
                         <div className="text-3xl font-black text-emerald-400">{result.prices.tp1}</div>
                     </div>
                     <div className="bg-black/40 rounded-2xl p-4 border border-emerald-500/20 text-center">
-                        <div className="text-emerald-500 font-bold mb-1 text-sm">第二批停利 (70%)</div>
+                        <div className="text-emerald-500 font-bold mb-1 text-sm">第二批停利 (50%)</div>
                         <div className="text-3xl font-black text-emerald-400">{result.prices.tp2}</div>
                     </div>
                 </div>

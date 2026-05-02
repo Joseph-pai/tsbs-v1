@@ -84,8 +84,8 @@ export async function GET(request: Request) {
         // Prices
         const buyPrice = Number(((latestHigh + latestLow) / 2).toFixed(2));
         const stopLossPrice = Number((ma20 || latestLow).toFixed(2));
-        const tp1Price = Number((buyPrice * 1.3).toFixed(2));
-        const tp2Price = Number((buyPrice * 1.7).toFixed(2));
+        const tp1Price = Number((buyPrice * 1.25).toFixed(2));
+        const tp2Price = Number((buyPrice * 1.50).toFixed(2));
 
         // Logic Status
         let light = 'red';
@@ -163,7 +163,8 @@ export async function GET(request: Request) {
                     ma20: ma20 ? Number(ma20.toFixed(2)) : null,
                     positionPercent: Number(positionPercent.toFixed(1)),
                     isHighTurnover,
-                    turnoverRate: turnoverRate > 0 ? Number(turnoverRate.toFixed(2)) : null
+                    turnoverRate: turnoverRate > 0 ? Number(turnoverRate.toFixed(2)) : null,
+                    isStopLossFallback: !ma20
                 },
                 interpretations: rules,
             }
