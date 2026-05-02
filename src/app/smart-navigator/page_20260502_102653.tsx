@@ -64,14 +64,6 @@ const INTERPRETATION_DETAILS: Record<string, InterpretationDetail> = {
         analysis: '這是最危險的技術信號之一。「天量」指成交量異常巨大，遠超過平日均量。在高位出現天量，最常見原因是主力趁利多消息大量出貨。主力賣出的對手方恰好是市場上興奮追買的散戶（俗稱割韭菜），是極其危險的翻轉訊號。',
         action: '不管目前持有多少，見到此信號必須堅決停損離場。這是資金保全的生死抉擇，寧可少賺，絕對不可大虧。',
     },
-    '真實換手率': {
-        analysis: '「換手率」代表當天成交股數佔總發行股數的比例。數值越高，代表市場交投越熱絡、籌碼流動越快。分析師判斷換手率的邏輯是「結合股價位階」：在低檔區出現高換手（>5%），代表主力可能在吸籌、籌碼大換血；在高檔區出現高換手，則極可能是主力在出貨、籌碼開始鬆動。',
-        action: '換手率是「熱度指標」，不代表絕對的買賣點，請與上方的「位階狀態」合併參考。低位高換手可偏多看待，高位高換手請提高警覺。',
-    },
-    '換手熱度': {
-        analysis: '當缺乏精確的總股本資料時，分析師會改用「當日成交量與5日均量」做比較來評估熱度。若當日量大於5日均量2倍以上，即視為換手熱烈。與真實換手率一樣，其意義必須結合「股價位階」來判斷。',
-        action: '這是一個輔助熱度的指標。如果在底部爆量（大於均量2倍），是潛在的起漲信號；如果在高檔爆量，則是危險的警訊。',
-    },
 };
 
 const lightColors = {
@@ -150,13 +142,15 @@ function ResultCard({ result, stockId, stockName }: { result: any, stockId: stri
 
     return (
         <div className="animate-in fade-in slide-in-from-bottom-8 duration-700 space-y-6 mb-12">
-            {/* Stock Title */}
-            <div className="flex items-center gap-3 mb-2">
-                <div className="bg-indigo-500/20 text-indigo-400 px-4 py-2 rounded-xl font-black border border-indigo-500/30 text-xl">
-                    {stockId}
+            {/* Title for Auto Filter Results */}
+            {stockName && (
+                <div className="flex items-center gap-3 mb-2">
+                    <div className="bg-indigo-500/20 text-indigo-400 px-4 py-2 rounded-xl font-black border border-indigo-500/30 text-xl">
+                        {stockId}
+                    </div>
+                    <div className="text-2xl font-black text-white">{stockName}</div>
                 </div>
-                {stockName && <div className="text-2xl font-black text-white">{stockName}</div>}
-            </div>
+            )}
 
             {/* Traffic Light */}
             <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-2xl flex flex-col items-center justify-center relative overflow-hidden">
@@ -644,7 +638,7 @@ export default function SmartNavigatorPage() {
 
                 {/* Result Area (Single Search) */}
                 {result && !showAutoFilter && (
-                    <ResultCard result={result} stockId={stockId} stockName={result.stockName} />
+                    <ResultCard result={result} stockId={stockId} />
                 )}
 
                 {/* Result Area (Auto Filter) */}

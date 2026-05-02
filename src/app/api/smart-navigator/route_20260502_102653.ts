@@ -35,13 +35,6 @@ export async function GET(request: Request) {
         const latestLow = latestData.min;
         const latestVolumeShares = latestData.Trading_Volume * 1000;
 
-        // Fetch stock name (cached after first call per server instance)
-        let stockName = stockId;
-        try {
-            await ExchangeClient.getIndustryMapping(); // populates _stockNameCache
-            stockName = ExchangeClient.getStockName(stockId) || stockId;
-        } catch (_) { /* fallback to stockId if name lookup fails */ }
-
         // Fetch Total Outstanding Shares
         const totalShares = await getTotalShares(stockId);
         
@@ -150,7 +143,6 @@ export async function GET(request: Request) {
             success: true,
             data: {
                 stockId,
-                stockName,
                 light,
                 prices: {
                     buy: buyPrice,
