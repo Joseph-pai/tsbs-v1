@@ -23,47 +23,19 @@ export default function StockDetailPage() {
     const handleDownload = async () => {
         if (isPrinting) return;
         setIsPrinting(true);
-
-        // Wait for button state to render before capturing
-        await new Promise(resolve => setTimeout(resolve, 300));
-
         try {
             const html2canvas = (await import('html2canvas')).default;
             const element = document.getElementById('stock-analysis-content');
             if (!element) return;
-
-            // Scroll to top to ensure full capture from beginning
-            window.scrollTo(0, 0);
-
-            // Temporarily remove overflow constraints so full content is visible
-            const prevBodyOverflow = document.body.style.overflow;
-            const prevHtmlOverflow = document.documentElement.style.overflow;
-            document.body.style.overflow = 'visible';
-            document.documentElement.style.overflow = 'visible';
-
-            // Allow reflow after style changes
-            await new Promise(resolve => setTimeout(resolve, 150));
-
-            const fullWidth = element.scrollWidth;
-            const fullHeight = element.scrollHeight;
-
             const canvas = await html2canvas(element, {
                 backgroundColor: '#020617',
                 scale: 2,
                 useCORS: true,
-                allowTaint: true,
                 scrollX: 0,
                 scrollY: 0,
-                width: fullWidth,
-                height: fullHeight,
-                windowWidth: fullWidth,
-                windowHeight: fullHeight,
+                windowWidth: element.scrollWidth,
+                windowHeight: element.scrollHeight,
             });
-
-            // Restore original overflow styles
-            document.body.style.overflow = prevBodyOverflow;
-            document.documentElement.style.overflow = prevHtmlOverflow;
-
             const link = document.createElement('a');
             const stockNameStr = typeof symbol === 'string' ? symbol : (symbol as string[])[0];
             link.download = `${stockNameStr}_分析報告_${new Date().toLocaleDateString('zh-TW', { year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/\//g, '')}.png`;
