@@ -24,40 +24,25 @@ export default function StockDetailPage() {
         if (isPrinting) return;
         setIsPrinting(true);
 
-        // Wait for isPrinting UI state to render first
+        // Wait for button state to render before capturing
         await new Promise(resolve => setTimeout(resolve, 300));
-
-        const styleEl = document.createElement('style');
-        styleEl.id = 'html2canvas-override';
 
         try {
             const html2canvas = (await import('html2canvas')).default;
             const element = document.getElementById('stock-analysis-content');
             if (!element) return;
 
-            // Scroll to top before capture
+            // Scroll to top to ensure full capture from beginning
             window.scrollTo(0, 0);
 
-            // Inject !important overrides to remove ALL height/overflow constraints
-            styleEl.textContent = `
-                html, body {
-                    height: auto !important;
-                    min-height: 0 !important;
-                    overflow: visible !important;
-                }
-                #stock-analysis-content {
-                    height: auto !important;
-                    min-height: 0 !important;
-                    overflow: visible !important;
-                }
-            `;
-            document.head.appendChild(styleEl);
+            // Temporarily remove overflow constraints so full content is visible
+            const prevBodyOverflow = document.body.style.overflow;
+            const prevHtmlOverflow = document.documentElement.style.overflow;
+            document.body.style.overflow = 'visible';
+            document.documentElement.style.overflow = 'visible';
 
-            // Wait for reflow: timeout + 2 animation frames for complete paint
-            await new Promise(resolve => setTimeout(resolve, 200));
-            await new Promise(resolve =>
-                requestAnimationFrame(() => requestAnimationFrame(resolve))
-            );
+            // Allow reflow after style changes
+            await new Promise(resolve => setTimeout(resolve, 150));
 
             const fullWidth = element.scrollWidth;
             const fullHeight = element.scrollHeight;
@@ -67,9 +52,6 @@ export default function StockDetailPage() {
                 scale: 2,
                 useCORS: true,
                 allowTaint: true,
-                logging: false,
-                x: 0,
-                y: 0,
                 scrollX: 0,
                 scrollY: 0,
                 width: fullWidth,
@@ -78,9 +60,9 @@ export default function StockDetailPage() {
                 windowHeight: fullHeight,
             });
 
-            // Clean up injected style
-            const injected = document.getElementById('html2canvas-override');
-            if (injected) document.head.removeChild(injected);
+            // Restore original overflow styles
+            document.body.style.overflow = prevBodyOverflow;
+            document.documentElement.style.overflow = prevHtmlOverflow;
 
             const link = document.createElement('a');
             const stockNameStr = typeof symbol === 'string' ? symbol : (symbol as string[])[0];
@@ -89,9 +71,6 @@ export default function StockDetailPage() {
             link.click();
         } catch (err) {
             console.error('截圖失敗:', err);
-            // Always clean up style tag on error too
-            const injected = document.getElementById('html2canvas-override');
-            if (injected) document.head.removeChild(injected);
         } finally {
             setIsPrinting(false);
         }
