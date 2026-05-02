@@ -3,7 +3,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { TradingViewChart } from '@/components/charts/TradingViewChart';
 import { useParams, useRouter } from 'next/navigation';
-import { ChevronLeft, Info, Activity, Zap, ShieldCheck, AlertTriangle, Calculator, DollarSign, LineChart, PieChart, BarChart3, TrendingUp, Flame, Target, MessageSquare, Download, Loader2 } from 'lucide-react';
+import { ChevronLeft, Info, Activity, Zap, ShieldCheck, AlertTriangle, Calculator, DollarSign, LineChart, PieChart, BarChart3, TrendingUp, Flame, Target, MessageSquare } from 'lucide-react';
 import { calculateSMA } from '@/services/indicators';
 import { StockCandle, AnalysisResult } from '@/types';
 import { useEffect, useState, useMemo } from 'react';
@@ -18,35 +18,6 @@ export default function StockDetailPage() {
     const router = useRouter();
     const [isLandscape, setIsLandscape] = useState(false);
     const [showChart, setShowChart] = useState(true);  // Toggle K-line visibility
-    const [isPrinting, setIsPrinting] = useState(false);
-
-    const handleDownload = async () => {
-        if (isPrinting) return;
-        setIsPrinting(true);
-        try {
-            const html2canvas = (await import('html2canvas')).default;
-            const element = document.getElementById('stock-analysis-content');
-            if (!element) return;
-            const canvas = await html2canvas(element, {
-                backgroundColor: '#020617',
-                scale: 2,
-                useCORS: true,
-                scrollX: 0,
-                scrollY: 0,
-                windowWidth: element.scrollWidth,
-                windowHeight: element.scrollHeight,
-            });
-            const link = document.createElement('a');
-            const stockNameStr = typeof symbol === 'string' ? symbol : (symbol as string[])[0];
-            link.download = `${stockNameStr}_分析報告_${new Date().toLocaleDateString('zh-TW', { year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/\//g, '')}.png`;
-            link.href = canvas.toDataURL('image/png');
-            link.click();
-        } catch (err) {
-            console.error('截圖失敗:', err);
-        } finally {
-            setIsPrinting(false);
-        }
-    };
 
     useEffect(() => {
         const checkOrientation = () => {
@@ -157,7 +128,7 @@ export default function StockDetailPage() {
     const isPositive = data.change_percent >= 0;
 
     return (
-        <div id="stock-analysis-content" className={`flex flex-col bg-slate-950 text-white ${isLandscape ? 'h-screen overflow-hidden' : 'min-h-screen'}`}>
+        <div className={`flex flex-col bg-slate-950 text-white ${isLandscape ? 'h-screen overflow-hidden' : 'min-h-screen'}`}>
             {/* Landscape Floating Header: Back + Stock Name */}
             {isLandscape && (
                 <div className="fixed top-0 left-0 right-0 z-[100] flex items-center gap-4 px-6 py-4 bg-slate-950/90 backdrop-blur-xl border-b border-white/5 shadow-2xl">
@@ -168,21 +139,13 @@ export default function StockDetailPage() {
                     >
                         <ChevronLeft className="w-6 h-6" />
                     </button>
-                    <div className="flex items-baseline gap-3 flex-1">
+                    <div className="flex items-baseline gap-3">
                         <span className="text-2xl font-black font-mono text-blue-400 tracking-tighter">{symbol}</span>
                         {data.stock_name !== symbol && (
                             <h2 className="text-2xl font-black text-white">{data.stock_name}</h2>
                         )}
                         <span className="text-[10px] font-black tracking-[0.2em] text-blue-500 uppercase bg-blue-500/10 px-3 py-1 rounded-full border border-blue-500/20">專業分析視圖</span>
                     </div>
-                    <button
-                        onClick={handleDownload}
-                        disabled={isPrinting}
-                        className="flex items-center gap-2 px-4 py-2 bg-indigo-600/20 hover:bg-indigo-600/40 disabled:opacity-50 border border-indigo-500/40 rounded-xl text-indigo-400 text-sm font-black transition-all active:scale-95"
-                    >
-                        {isPrinting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-                        {isPrinting ? '產生中...' : '列印下載'}
-                    </button>
                 </div>
             )}
 
@@ -199,14 +162,7 @@ export default function StockDetailPage() {
                             {data.stock_name !== symbol && data.stock_name}
                         </h2>
                     </div>
-                    <button
-                        onClick={handleDownload}
-                        disabled={isPrinting}
-                        className="flex items-center gap-1.5 px-3 py-2 bg-indigo-600/20 hover:bg-indigo-600/40 disabled:opacity-50 border border-indigo-500/40 rounded-xl text-indigo-400 text-xs font-black transition-all active:scale-95"
-                    >
-                        {isPrinting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-                        {isPrinting ? '產生中...' : '列印下載'}
-                    </button>
+                    <div className="w-8" /> {/* Balance */}
                 </header>
             )}
 

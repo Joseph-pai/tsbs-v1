@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { Compass, Loader2, ArrowLeft, TrendingUp, AlertTriangle, HelpCircle, AlertCircle, Calendar as CalendarIcon, ChevronLeft, ChevronRight, X, Play, Filter, Download } from 'lucide-react';
+import { Compass, Loader2, ArrowLeft, TrendingUp, AlertTriangle, HelpCircle, AlertCircle, Calendar as CalendarIcon, ChevronLeft, ChevronRight, X, Play, Filter } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import AuthGuard from '@/components/layout/AuthGuard';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, getDay, addMonths, subMonths } from 'date-fns';
@@ -241,38 +241,6 @@ export default function SmartNavigatorPage() {
     const [filterResults, setFilterResults] = useState<Array<{stockId: string, stockName: string, data: any}>>([]);
     const [filterCompleted, setFilterCompleted] = useState(false);
 
-    // Print State
-    const [isPrinting, setIsPrinting] = useState(false);
-
-    const handleDownload = async () => {
-        if (isPrinting) return;
-        setIsPrinting(true);
-        try {
-            const html2canvas = (await import('html2canvas')).default;
-            const element = document.getElementById('smart-navigator-content');
-            if (!element) return;
-            const canvas = await html2canvas(element, {
-                backgroundColor: '#020617',
-                scale: 2,
-                useCORS: true,
-                scrollX: 0,
-                scrollY: 0,
-                windowWidth: element.scrollWidth,
-                windowHeight: element.scrollHeight,
-            });
-            const link = document.createElement('a');
-            link.download = `智能選股導航_分析報告_${new Date().toLocaleDateString('zh-TW', { year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/\//g, '')}.png`;
-            link.href = canvas.toDataURL('image/png');
-            link.click();
-        } catch (err) {
-            console.error('截圖失敗:', err);
-        } finally {
-            setIsPrinting(false);
-        }
-    };
-
-    const hasResults = (result && !showAutoFilter) || (showAutoFilter && filterCompleted && filterResults.length > 0);
-
     // Load history records
     useEffect(() => {
         if (user && showAutoFilter) {
@@ -402,27 +370,15 @@ export default function SmartNavigatorPage() {
 
     return (
         <AuthGuard>
-            <div id="smart-navigator-content" className="container mx-auto px-6 py-12 max-w-2xl min-h-screen">
+            <div className="container mx-auto px-6 py-12 max-w-2xl min-h-screen">
                 {/* Header */}
-                <div className="flex items-center justify-between mb-8">
-                    <button
-                        onClick={() => router.push('/')}
-                        className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors"
-                    >
-                        <ArrowLeft className="w-5 h-5" />
-                        返回主控台
-                    </button>
-                    {hasResults && (
-                        <button
-                            onClick={handleDownload}
-                            disabled={isPrinting}
-                            className="flex items-center gap-2 px-4 py-2 bg-indigo-600/20 hover:bg-indigo-600/40 disabled:opacity-50 border border-indigo-500/40 rounded-xl text-indigo-400 text-sm font-black transition-all active:scale-95"
-                        >
-                            {isPrinting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-                            {isPrinting ? '產生中...' : '列印下載'}
-                        </button>
-                    )}
-                </div>
+                <button
+                    onClick={() => router.push('/')}
+                    className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors mb-8"
+                >
+                    <ArrowLeft className="w-5 h-5" />
+                    返回主控台
+                </button>
 
                 <div className="text-center mb-12">
                     <div className="inline-flex items-center gap-3 px-6 py-2 rounded-full bg-indigo-500/10 border border-indigo-500/30 mb-6 shadow-lg shadow-indigo-500/10">
