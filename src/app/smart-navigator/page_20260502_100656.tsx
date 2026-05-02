@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { Compass, Loader2, ArrowLeft, TrendingUp, AlertTriangle, HelpCircle, AlertCircle, Calendar as CalendarIcon, ChevronLeft, ChevronRight, X, Play, Filter, Download, BookOpen } from 'lucide-react';
+import { Compass, Loader2, ArrowLeft, TrendingUp, AlertTriangle, HelpCircle, AlertCircle, Calendar as CalendarIcon, ChevronLeft, ChevronRight, X, Play, Filter, Download } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import AuthGuard from '@/components/layout/AuthGuard';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, getDay, addMonths, subMonths } from 'date-fns';
@@ -9,61 +9,14 @@ import { getScanRecords } from '@/services/firebaseDb';
 import { useAuth } from '@/lib/firebase/context/AuthContext';
 
 // --- Constants & Dictionary ---
-type InterpretationDetail = { analysis: string; action: string; };
-
-const INTERPRETATION_DETAILS: Record<string, InterpretationDetail> = {
-    '股價穩站 20 日均線': {
-        analysis: '20日均線（月線）是技術分析中最核心的趨勢分水嶺。當股價站穩月線，代表中期買方力道強過賣方，多頭格局成立。專業分析師以「站穩月線」作為持股的基本門檻，並以此作為停損判斷的關鍵防線。',
-        action: '持股者可安心持有，等待下一個催化劑推升。未持股者可在股價回測月線時分批低接，風險報酬比較佳。',
-    },
-    '股價跌破 20 日均線': {
-        analysis: '跌破月線是最直接的趨勢轉弱訊號。法人機構普遍將「收盤跌破20MA」設為自動停損觸發點。跌破後，原本的支撐線反轉成壓力線，後續反彈到均線附近往往遭到賣壓壓制，越晚出場損失越大。',
-        action: '嚴格執行減倉或停損，切勿抱持「等反彈」心態。先保留資金，待股價重新站穩20MA後再評估重新進場時機。',
-    },
-    'MACD 維持零軸之上': {
-        analysis: 'MACD的DIF線在零軸之上，代表快速均線高於慢速均線，短期趨勢明確向上，上漲動能充沛。這是確認多頭行情的輔助指標，與均線站穩搭配使用能大幅提升信號可靠度。',
-        action: '動能方向確認偏多，配合量能放大，是追蹤強勢股的正面佐證。做多方向風險相對較低。',
-    },
-    '相對低位': {
-        analysis: '「位階」是指目前股價在近期高低點之間的相對位置。低於30%代表股價仍處於相對谷底，距離近期高點空間巨大。分析師喜歡在低位佈局，因為風險報酬比最佳：下跌空間有限（跌不動），上漲潛力大（籌碼乾淨）。',
-        action: '這是最理想的佈局位置。結合換手率訊號，若出現量增即是絕佳進場時機。建議分批買入，停損設在近期低點之下。',
-    },
-    '相對高位': {
-        analysis: '股價位階超過70%代表已接近近期高點，追漲風險大幅提升。此時市場情緒偏向樂觀，但統計上高位入場的盈虧比不佳。法人在此位置通常不加碼，而是評估是否分批獲利了結。',
-        action: '未持股者不建議追高，風險報酬比過低。持股者應提高警覺，設定移動停利點（trailing stop），準備分批出場。',
-    },
-    '中階位置': {
-        analysis: '30%~70%是多空力量最為均衡的中間地帶。股價在此區域往往呈現盤整，市場參與者都在等待下一個明確方向。分析師在中階位置不會輕易下決定，而是耐心等待量能和方向的確認信號。',
-        action: '採觀望策略，切忌在無量的中途隨意追入。等待帶量突破或放量跌破支撐後，再決定操作方向。',
-    },
-    '主力積極換手，底部量增': {
-        analysis: '「底部量增」是主力吸籌最明顯的特徵。主力在低位大量買入，吸收掉市場上所有想停損的散戶籌碼。成交量放大代表資金積極進場，而股價同時跌不下去，說明每一筆賣盤都被強力承接，是籌碼轉移的關鍵訊號。',
-        action: '這是最接近底部的買入機會，風險報酬比極佳。建議積極分批布局，停損設在最近一個明顯低點之下。',
-    },
-    '低位量縮整理': {
-        analysis: '低位量縮代表市場賣壓已徹底枯竭，有意願賣出的投資人都已賣光。雖然目前缺乏買方力道（量小），但下跌空間極為有限。分析師稱此現象為「洗盤完成、蓄勢待發」——是靜待啟動的等待階段。',
-        action: '可以非常輕倉（部位的10-20%）在支撐區試單，停損設在低點之下。等待量能放大確認啟動後，再積極加碼追買。',
-    },
-    '帶量突破盤整區': {
-        analysis: '帶量突破是技術分析中最強力的買入信號之一，「帶量」是關鍵。無量的突破稱為「假突破」，隨時可能拉回。帶量突破代表大量買家在更高價格達成共識，顯示市場信心強烈，是新一波上升趨勢的啟動確認。',
-        action: '這是追入的最佳時機。專業操作是突破時直接追入，停損設在突破點之下。切記不要等回測，真正強勢突破往往不給回測的機會。',
-    },
-    '價穩量縮，方向待表態': {
-        analysis: '量縮代表市場觀望情緒濃厚，多空雙方都在等待驅動消息。股價穩定但沒有方向。分析師在此情況下刻意不操作，因為在無量環境下交易的勝率和效率都很低，等待信號才是正確策略。',
-        action: '保持觀望，不要在無量盤整中浪費資金。等待量能放大並確認方向（向上突破或向下跌破支撐）後再行動。',
-    },
-    '高位換手熱烈': {
-        analysis: '高位出現大量換手代表有人在積極賣出，同時也有人在積極買入。這種多空激烈廝殺在高位出現時，往往是短期頂點的特徵。分析師對此保持高度警戒，因為主力可能趁熱鬧出貨，如收長上影線則是明確賣出訊號。',
-        action: '持股者應設定嚴格停利點，拒絕再加碼。未持股者絕對不要追高。若當日收長上影線（高開低收），是明確的賣出信號。',
-    },
-    '高位量縮，籌碼相對穩定': {
-        analysis: '高位量縮是「籌碼集中」的象徵。主力惜售，沒有人急著在高位拋售，賣壓自然很輕。分析師稱此現象為「強者恆強」——強勢股在高位都是這種特徵，股價容易維持高位或緩步盤升。',
-        action: '持股者可安心持有，不必急於獲利了結。但需注意：一旦量能突然放大且出現長陰線，必須立即停利，那代表籌碼穩定格局已被打破。',
-    },
-    '高位爆出天量': {
-        analysis: '這是最危險的技術信號之一。「天量」指成交量異常巨大，遠超過平日均量。在高位出現天量，最常見原因是主力趁利多消息大量出貨。主力賣出的對手方恰好是市場上興奮追買的散戶（俗稱割韭菜），是極其危險的翻轉訊號。',
-        action: '不管目前持有多少，見到此信號必須堅決停損離場。這是資金保全的生死抉擇，寧可少賺，絕對不可大虧。',
-    },
+const INTERPRETATION_DETAILS: Record<string, string> = {
+    '高位量縮，籌碼相對穩定': '高位量縮代表股價雖處於近期高點，但成交量縮小，顯示主力惜售，賣壓極輕。這種情況下趨勢往往能維持或進入橫盤，對於持股者而言是籌碼安定的正面訊號。',
+    '高位爆出天量，主力疑似出貨': '「天量」是指成交量異常巨大。在股價高位出現天量，通常是主力趁利多消息將手中大量籌碼轉嫁給散戶的特徵（割韭菜），是極其危險的翻轉訊號。',
+    '高位換手熱烈，請留意追高風險': '代表高檔位置買賣雙方力道都很大，雖然股價還沒崩跌，但波動會加劇。此時追高風險極大，建議觀察是否能站穩成交密集區。',
+    '帶量突破盤整區，動能轉強': '股價盤整多日後，今天買盤強力湧入且推升價格（量價齊揚）。這代表多頭共識達成，通常是新一波漲勢的啟動點。',
+    '主力積極換手，底部量增': '股價在低位跌不動後開始出現大成交量，表示有新的主力進場吃貨並吸收掉散戶的停損單，是底部翻轉、準備起漲的徵兆。',
+    '低位量縮整理，可逢低少量試單': '代表賣盤已經吐盡（賣壓枯竭），股價雖然還沒開始漲，但下行空間有限。此時適合在支撐位附近小量佈局，等待發動。',
+    '價穩量縮，方向待表態': '股價波動變小且成交量委縮，代表市場正在等待下一個驅動消息。目前多空平衡，建議觀察股價會往哪個方向突破再做決定。'
 };
 
 const lightColors = {
@@ -234,46 +187,27 @@ function ResultCard({ result, stockId, stockName }: { result: any, stockId: stri
                     {result.interpretations.map((text: string, idx: number) => {
                         const matchingKey = Object.keys(INTERPRETATION_DETAILS).find(key => text.includes(key));
                         const detail = matchingKey ? INTERPRETATION_DETAILS[matchingKey] : null;
-                        const isOpen = activeTooltip === text;
 
                         return (
-                            <div key={idx} className="flex flex-col bg-black/40 rounded-xl border border-white/5 overflow-hidden">
-                                <div className="flex gap-3 p-4">
-                                    <div className="text-indigo-400 mt-0.5 flex-shrink-0">•</div>
-                                    <div className="text-slate-300 font-medium leading-relaxed flex-1">
+                            <div key={idx} className="relative flex flex-col bg-black/40 p-4 rounded-xl border border-white/5">
+                                <div className="flex gap-3">
+                                    <div className="text-indigo-400 mt-0.5">•</div>
+                                    <div className="text-slate-300 font-medium leading-relaxed flex items-center gap-2 flex-wrap">
                                         {text}
+                                        {detail && (
+                                            <button 
+                                                onClick={() => setActiveTooltip(activeTooltip === text ? null : text)}
+                                                className="text-indigo-400 hover:text-white transition-colors inline-flex"
+                                            >
+                                                <HelpCircle className="w-4 h-4" />
+                                            </button>
+                                        )}
                                     </div>
                                 </div>
-                                {detail && (
-                                    <div className="px-4 pb-3">
-                                        <button
-                                            onClick={() => setActiveTooltip(isOpen ? null : text)}
-                                            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-black tracking-wide border transition-all ${
-                                                isOpen
-                                                    ? 'bg-indigo-500/30 border-indigo-400/50 text-indigo-300'
-                                                    : 'bg-indigo-500/10 border-indigo-500/25 text-indigo-400 hover:bg-indigo-500/25'
-                                            }`}
-                                        >
-                                            <BookOpen className="w-3 h-3" />
-                                            專業解讀
-                                            <span className={`ml-0.5 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}>▾</span>
-                                        </button>
-                                    </div>
-                                )}
-                                {isOpen && detail && (
-                                    <div className="mx-4 mb-4 rounded-xl border border-indigo-500/20 bg-indigo-500/5 overflow-hidden animate-in slide-in-from-top-2 duration-300">
-                                        <div className="p-4 border-b border-indigo-500/15">
-                                            <div className="flex items-center gap-1.5 text-indigo-300 font-black text-xs tracking-widest uppercase mb-2">
-                                                <span>📊</span> 分析師怎麼看
-                                            </div>
-                                            <p className="text-sm text-slate-300 leading-relaxed">{detail.analysis}</p>
-                                        </div>
-                                        <div className="p-4">
-                                            <div className="flex items-center gap-1.5 text-emerald-400 font-black text-xs tracking-widest uppercase mb-2">
-                                                <span>💡</span> 操作建議參考
-                                            </div>
-                                            <p className="text-sm text-slate-300 leading-relaxed">{detail.action}</p>
-                                        </div>
+                                {activeTooltip === text && detail && (
+                                    <div className="mt-3 p-4 bg-indigo-500/10 border border-indigo-500/20 rounded-lg text-xs text-slate-300 leading-loose animate-in slide-in-from-top-2 duration-300">
+                                        <div className="text-white font-bold mb-1">💡 專家解讀：</div>
+                                        {detail}
                                     </div>
                                 )}
                             </div>
