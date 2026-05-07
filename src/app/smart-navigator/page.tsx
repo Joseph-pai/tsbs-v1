@@ -542,10 +542,9 @@ export default function SmartNavigatorPage() {
                         const json = await res.json();
                         if (json.success && json.data) {
                             if (filterMode === 'green') {
-                                if (json.data.metrics && json.data.metrics.positionPercent <= maxPosPercent) {
-                                    if (json.data.light === 'green') {
-                                        return { stockId: stock.id, stockName: stock.name, data: json.data, distributionLevel: null };
-                                    }
+                                // 主力進場：顯示所有有 signalTag 的股票（綠/黃/紅均含）
+                                if (json.data.signalTag !== null && json.data.signalTag !== undefined) {
+                                    return { stockId: stock.id, stockName: stock.name, data: json.data, distributionLevel: null };
                                 }
                             } else {
                                 if (json.data.distribution && json.data.distribution.level !== 'none') {
@@ -565,6 +564,10 @@ export default function SmartNavigatorPage() {
 
             if (filterMode === 'distribution') {
                 validResults.sort((a, b) => (levelOrder[a.distributionLevel] ?? 3) - (levelOrder[b.distributionLevel] ?? 3));
+            }
+            if (filterMode === 'green') {
+                const lightOrder: Record<string, number> = { green: 0, yellow: 1, red: 2 };
+                validResults.sort((a, b) => (lightOrder[a.data.light] ?? 1) - (lightOrder[b.data.light] ?? 1));
             }
 
             setFilterProgress({ current: uniqueStocks.length, total: uniqueStocks.length, phase: '分析完成' });
@@ -679,9 +682,9 @@ export default function SmartNavigatorPage() {
                                         <div className="flex gap-2">
                                             <button
                                                 onClick={() => setFilterMode('green')}
-                                                className={`flex-1 py-2.5 rounded-xl text-sm font-black border transition-all ${filterMode === 'green' ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400' : 'bg-black/40 border-slate-700 text-slate-400 hover:bg-slate-800'}`}
+                                                className={`flex-1 py-2.5 rounded-xl text-sm font-black border transition-all ${filterMode === 'green' ? 'bg-indigo-500/20 border-indigo-500 text-indigo-400' : 'bg-black/40 border-slate-700 text-slate-400 hover:bg-slate-800'}`}
                                             >
-                                                🟢 綠燈選股
+                                                🎯 主力進場
                                             </button>
                                             <button
                                                 onClick={() => setFilterMode('distribution')}
@@ -706,19 +709,8 @@ export default function SmartNavigatorPage() {
                                         </div>
                                     </div>
                                     {filterMode === 'green' && (
-                                        <div>
-                                            <div className="text-sm text-slate-400 mb-2 font-medium">3. 過濾條件: 相對高位小於</div>
-                                            <div className="grid grid-cols-3 gap-2">
-                                                {['50', '60', '70'].map(pos => (
-                                                    <button
-                                                        key={pos}
-                                                        onClick={() => setMaxPosition(pos)}
-                                                        className={`py-2 rounded-lg text-sm font-bold border transition-colors ${maxPosition === pos ? 'bg-amber-500/20 border-amber-500 text-amber-400' : 'bg-black/40 border-slate-700 text-slate-400 hover:bg-slate-800'}`}
-                                                    >
-                                                        {pos}%
-                                                    </button>
-                                                ))}
-                                            </div>
+                                        <div className="bg-indigo-500/5 border border-indigo-500/20 rounded-xl p-3 text-xs text-indigo-300/70">
+                                            📌 篩選出所有帶有主力動向訊號的股票，依 🟢 綠燈 → 🟡 黃燈 → 🔴 紅燈排序。跌破20日均線的股票不顯示。
                                         </div>
                                     )}
                                     
@@ -778,10 +770,10 @@ export default function SmartNavigatorPage() {
                     <div className="animate-in fade-in slide-in-from-bottom-8 duration-700">
                         <div className="flex items-center gap-3 mb-8">
                             <div className="h-[1px] flex-1 bg-slate-800"></div>
-                            <div className={`font-black tracking-widest text-lg ${filterMode === 'distribution' ? 'text-rose-400' : 'text-amber-400'}`}>
+                            <div className={`font-black tracking-widest text-lg ${filterMode === 'distribution' ? 'text-rose-400' : 'text-indigo-400'}`}>
                                 {filterMode === 'distribution'
                                     ? `出貨預警結果 (${filterResults.length} 檔)`
-                                    : `篩選結果 (${filterResults.length} 檔)`
+                                    : `主力動向篩選結果 (${filterResults.length} 檔)`
                                 }
                             </div>
                             <div className="h-[1px] flex-1 bg-slate-800"></div>
@@ -798,11 +790,25 @@ export default function SmartNavigatorPage() {
                                         : lvl === 'watch'
                                         ? { text: '🟡 留意觀察', cls: 'text-amber-400 border-amber-500/40 bg-amber-500/10' }
                                         : null;
+                                    // 主力進場模式的 badge
+                                    const greenBadge = filterMode === 'green' && res.data.signalTag ? {
+                                        text: `${res.data.light === 'green' ? '🟢' : res.data.light === 'red' ? '🔴' : '🟡'} ${res.data.signalTag}`,
+                                        cls: res.data.light === 'green'
+                                            ? 'text-emerald-400 border-emerald-500/40 bg-emerald-500/10'
+                                            : res.data.light === 'red'
+                                            ? 'text-rose-400 border-rose-500/40 bg-rose-500/10'
+                                            : 'text-amber-400 border-amber-500/40 bg-amber-500/10'
+                                    } : null;
                                     return (
                                         <div key={`${res.stockId}-${idx}`}>
                                             {badge && filterMode === 'distribution' && (
                                                 <div className={`mb-2 px-4 py-2 rounded-xl border font-black text-sm ${badge.cls}`}>
                                                     {badge.text}
+                                                </div>
+                                            )}
+                                            {greenBadge && (
+                                                <div className={`mb-2 px-4 py-2 rounded-xl border font-black text-sm ${greenBadge.cls}`}>
+                                                    {greenBadge.text}
                                                 </div>
                                             )}
                                             <ResultCard result={res.data} stockId={res.stockId} stockName={res.stockName} />
@@ -819,7 +825,7 @@ export default function SmartNavigatorPage() {
                                 <p className="text-slate-500">
                                     {filterMode === 'distribution'
                                         ? '在選定日期的掃描紀錄中，沒有發現出現出貨預警訊號的股票。可嘗試選擇其他日期。'
-                                        : '在選定日期的掃描紀錄中，沒有找到符合目前綠燈標準的股票。您可以嘗試放寬「數據日期區間」或「相對高位%值」，或者選擇其他日期。'
+                                        : '在選定日期的掃描紀錄中，沒有發現任何帶有主力動向訊號的股票。可嘗試選擇其他日期或調整「數據日期區間」。'
                                     }
                                 </p>
                             </div>
