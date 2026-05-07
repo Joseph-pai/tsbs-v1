@@ -134,3 +134,17 @@ export const calculateMACD = (prices: number[], shortPeriod = 12, longPeriod = 2
         osc: latestOsc
     };
 };
+
+/**
+ * Calculate MACD Full History
+ * Returns full difArray and macdArray for divergence analysis.
+ * Does NOT replace calculateMACD — this is an extended version for advanced signals.
+ */
+export const calculateMACDFull = (prices: number[], shortPeriod = 12, longPeriod = 26, signalPeriod = 9) => {
+    if (prices.length < longPeriod) return null;
+    const emaShort = calculateEMA(prices, shortPeriod);
+    const emaLong = calculateEMA(prices, longPeriod);
+    const difArray = prices.map((_, i) => emaShort[i] - emaLong[i]);
+    const macdArray = calculateEMA(difArray, signalPeriod);
+    return { difArray, macdArray };
+};

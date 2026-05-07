@@ -219,6 +219,78 @@ function ResultCard({ result, stockId, stockName }: { result: any, stockId: stri
                 </div>
             </div>
 
+            {/* Distribution Warning Card */}
+            {result.distribution && result.distribution.level !== 'none' && (() => {
+                const dist = result.distribution;
+                const lvl = dist.level as 'watch' | 'warning' | 'alert';
+                const isAlert = lvl === 'alert';
+                const isWarning = lvl === 'warning';
+
+                const borderColor = isAlert ? 'border-rose-500/50' : isWarning ? 'border-orange-500/50' : 'border-amber-500/40';
+                const bgColor = isAlert ? 'bg-rose-500/5' : isWarning ? 'bg-orange-500/5' : 'bg-amber-500/5';
+                const glowStyle = isAlert ? '0 0 25px rgba(244,63,94,0.18)' : isWarning ? '0 0 25px rgba(249,115,22,0.18)' : '';
+                const titleColor = isAlert ? 'text-rose-400' : isWarning ? 'text-orange-400' : 'text-amber-400';
+                const dotColor = isAlert ? 'bg-rose-400' : isWarning ? 'bg-orange-400' : 'bg-amber-400';
+                const actionBg = isAlert ? 'bg-rose-500/10 border-rose-500/20' : isWarning ? 'bg-orange-500/10 border-orange-500/20' : 'bg-amber-500/10 border-amber-500/20';
+
+                const levelLabel = isAlert ? '🔴 出貨進行中' : isWarning ? '🟠 出貨準備前兆' : '🟡 留意觀察';
+
+                const explanation = isAlert
+                    ? '多重前兆同時觸發，且當日出現高換手放量。主力正借助市場熱情大量倒貨給散戶，散戶此時正在成為接盤方。這是最危險的籌碼轉移訊號，股價隨時可能急轉直下。'
+                    : isWarning
+                    ? '多個主力撤退前兆同時出現，顯示主力可能已開始慢慢分批出貨，但尚未進入大規模傾倒階段。此為早期預警窗口，是最後可以從容規劃出場的時機。'
+                    : '出現一個主力動態異常跡象。單一訊號尚不構成警報，但在高位出現任何異常均不可忽視，需提高警覺並停止追加買入。';
+
+                const actionText = isAlert
+                    ? '立即停損離場，不等反彈、不抱僥倖。見到此訊號，資金保全優先於任何獲利期待。寧可少賺，絕不讓已有獲利大量縮水。'
+                    : isWarning
+                    ? '分批縮減持倉 30%~50%，將剩餘部位的停利點上移，設置移動停利保護獲利。在警報解除前絕對不追加買入。'
+                    : '停止追加買入，開始規劃停利計畫。將停利點上移至成本 +15% 以上，密切觀察後續量價變化，若再出現一個前兆訊號即升級為橙色警報。';
+
+                const signals: { text: string; desc: string }[] = [];
+                if (dist.hasMacdDivergence) signals.push({ text: 'MACD 頂背離', desc: '股價創高但動能指標衰退，上漲後繼不足' });
+                if (dist.isVolumeDeclineAtHigh) signals.push({ text: '高位量能遞減', desc: `近 5 日成交量持續萎縮，買方力道逐漸枯竭` });
+                if (dist.isHighStagnant) signals.push({ text: `高位橫盤 ${dist.highStagnationDays} 日`, desc: '多方無力再攻頂，高位出現滯漲現象' });
+
+                return (
+                    <div
+                        className={`rounded-3xl p-6 shadow-2xl border ${borderColor} ${bgColor} animate-in fade-in duration-500`}
+                        style={glowStyle ? { boxShadow: glowStyle } : {}}
+                    >
+                        <div className={`font-black text-base mb-1 flex items-center gap-2 ${titleColor}`}>
+                            <AlertTriangle className="w-5 h-5" />
+                            主力動向預警
+                        </div>
+                        <div className={`text-xl font-black mb-5 ${titleColor}`}>{levelLabel}</div>
+
+                        {/* Triggered signals */}
+                        <div className="space-y-2 mb-5">
+                            {signals.map((s, i) => (
+                                <div key={i} className="flex items-start gap-2.5 text-sm bg-black/20 rounded-xl p-3">
+                                    <div className={`w-2 h-2 rounded-full flex-shrink-0 mt-1.5 ${dotColor}`} />
+                                    <div>
+                                        <span className="text-slate-100 font-black">{s.text}</span>
+                                        <span className="text-slate-400 ml-2">{s.desc}</span>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+
+                        {/* Explanation */}
+                        <div className="bg-black/30 rounded-xl p-4 mb-3 border border-white/5">
+                            <div className="text-xs font-black tracking-widest text-slate-400 uppercase mb-2">📊 市場解讀</div>
+                            <p className="text-sm text-slate-300 leading-relaxed">{explanation}</p>
+                        </div>
+
+                        {/* Action */}
+                        <div className={`rounded-xl p-4 border ${actionBg}`}>
+                            <div className={`text-xs font-black tracking-widest uppercase mb-2 ${titleColor}`}>💡 操作建議</div>
+                            <p className="text-sm text-slate-300 leading-relaxed">{actionText}</p>
+                        </div>
+                    </div>
+                );
+            })()}
+
             {/* Prices */}
             <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-2xl">
                 <div className="text-slate-400 font-black mb-6 tracking-widest text-sm text-center">智能操作價格</div>
