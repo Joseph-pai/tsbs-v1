@@ -235,56 +235,71 @@ export async function GET(request: Request) {
                 rules.push('MACD動能指標剛從負值轉為正值，且股價處於極低位置，是技術面「由跌轉漲」的關鍵轉折訊號。建議：少量試單（10%～15%），以20日均線為停損，確認量能跟上後再加碼。');
             } else if (isShrinkingTurnover) {
                 light = 'yellow';
-                rules.push('低位成交縮小，市場觀望情緒濃厚。建議：觀望為主，可少量逢低試探，但不宜重倉，等待明確放量訊號。');
+                signalTag = '主力暗中佈局';
+                rules.push('低位成交大幅縮小，市場浮額正在減少，有意願賣出的人越來越少，籌碼開始悄悄集中。這是主力可能正在暗中佈局的早期跡象，但MACD動能尚未確認轉正。建議：可用總資金5%~10%試探性建立少量倉位，停損設在近期低點下方，耐心等待MACD轉正或量能放大後再加碼。');
             } else {
                 light = 'yellow';
-                rules.push('低位整理中，量能未有明顯變化。建議：列入觀察清單，等待成交量明顯放大或MACD轉正後再考慮介入。');
+                signalTag = '低位整理等待';
+                rules.push('低位整理中，量能未有明顯變化，市場觀望情緒濃厚。目前尚無明確的主力介入跡象，但低位本身風險報酬比佳。建議：列入觀察清單，耐心等待成交量明顯放大（超過近期均量2倍）或MACD指標轉正後，再考慮介入。');
             }
         } else if (positionPercent > 70) {
-            // High position zone
+            // High position zone — 炒作尾聲警戒區
             rules.push(`目前股價處於近 ${period} 日相對高位（>70%）。`);
             if (isExtremelyHighTurnover || (isHighTurnover && hasLongUpperShadow)) {
-                // Signal 2: High position + extreme turnover or long upper shadow = 主力派發出貨
+                // Signal 2: 炒作尾聲 — 主力大量出貨
                 light = 'red';
+                signalTag = '主力高位出貨';
                 if (hasLongUpperShadow) {
-                    rules.push('高位長上影線放量，主力疑似出貨，請提高警覺嚴格停損！');
+                    rules.push('⚠️ 高位出現長上影線並伴隨放量。這是主力趁市場熱情高漲大量賣出的典型訊號（俗稱「射擊之星」）。上影線越長，代表當日賣壓越強，大量散戶正在接盤。建議：無論獲利多少，必須立即減碼50%以上，切勿等待反彈。剩餘持股設嚴格停損，高位反彈即為出場機會。');
                 } else {
-                    rules.push('高位爆出天量，主力疑似出貨，請提高警覺嚴格停損！');
+                    rules.push('⚠️ 高位爆出超大量（超過近期均量4倍以上）。這通常是主力藉助利多消息或市場狂熱，在最高點附近大量傾倒籌碼的訊號。散戶正在成為主力的接盤方。建議：見此訊號必須立即停損離場，寧可少賺，絕不在主力出貨時繼續持有。');
                 }
             } else if (isTrending5DayHighTurnover) {
-                // Signal 5 in high zone: 連續高換手震盪 = 對倒或洗盤
+                // Signal 5 in high zone: 對倒震盪 — 方向不明
                 light = 'yellow';
-                rules.push('連續換手股價停滯，疑似主力對倒洗籌，觀察突破方向再決策。');
+                signalTag = '高位對倒震盪';
+                rules.push('連續5日以上保持高換手，但股價在小範圍劇烈震盪而未有效突破。這可能是主力「左手換右手」製造熱鬧假象，或是在洗清短線浮額。在高位出現此訊號風險較大，方向尚未明朗。建議：採觀望策略，不要追入熱鬧假象。若後續放量向上突破壓力，可少量跟進；若向下跌破支撐，立即離場。');
             } else if (isHighTurnover) {
                 // High turnover at high position, not extreme
                 light = 'yellow';
-                rules.push('高位換手熱烈，請留意追高風險。');
+                signalTag = '高位追漲風險';
+                rules.push('高位出現明顯放量（超過均量2倍），代表有人在積極賣出，同時也有人積極買入，多空激烈廝殺。在高位出現此現象往往是短期頂點特徵。建議：持股者設定嚴格停利點（距成本+20%以上），絕對不追高加碼。若收盤出現長上影線，視為明確賣出訊號。');
             } else if (isShrinkingTurnover) {
                 // Signal 4 in high zone: 籌碼鎖定惜售
                 light = 'yellow';
-                rules.push('高位量縮，籌碼相對穩定，建議持股續抱。');
+                signalTag = '高位量縮惜售';
+                rules.push('高位量能萎縮，代表主力惜售，沒有人急著在高位拋售，賣壓很輕。這是「強者恆強」的高位特徵，股價容易維持高位或緩步盤升。建議：持股者可繼續持有，不必急於獲利了結。但請設定移動停利（trailing stop），一旦量能突然放大且出現大陰線，必須立即停利出場。');
             } else {
                 light = 'yellow';
-                rules.push('高位量縮，籌碼相對穩定，建議持股續抱。');
+                signalTag = '高位整理觀察';
+                rules.push('股價在相對高位橫盤整理，量能平穩無特殊異常。目前尚無明確出貨跡象，但高位本身追漲風險較高。建議：未持股者不建議追高進場，風險報酬比不佳。持股者繼續持有但需提高警戒，密切觀察「出貨預警」卡片是否出現黃橙紅訊號，設好移動停利保護獲利。');
             }
         } else {
-            // Middle position 30~70
-            rules.push(`目前股價處於近 ${period} 日中階位置。`);
+            // Middle position 30~70 — 炒作進行中觀察區
+            rules.push(`目前股價處於近 ${period} 日中階位置（30%~70%）。`);
             if (isTrending5DayHighTurnover && !isHighTurnover) {
                 // Signal 5 in middle zone: 連續換手但今日未特別放量
                 light = 'yellow';
-                rules.push('連續換手股價停滯，疑似主力對倒洗籌，觀察突破方向再決策。');
-            } else if (isHighTurnover) {
-                // Signal 3: Middle position + high turnover = 強勢突破拉升
+                signalTag = '中位對倒整理';
+                rules.push('連續多日保持高換手，但股價在中間區間劇烈震盪。此為主力可能在洗清短線散戶浮額，是上漲途中常見的「中途洗盤」型態，也可能是主力開始減碼。建議：靜觀震盪結束後的突破方向。若帶量向上突破，是加碼信號；若跌破支撐，則需減碼。');            } else if (isHighTurnover) {
+                // Signal 3: 炒作進行中 — 主力帶量突破
                 light = 'green';
-                rules.push('帶量突破盤整區，動能轉強。');
+                signalTag = '主力突破拉升';
+                rules.push('帶量突破盤整區，成交量超過近期均量2倍以上，是技術分析中最強力的買入訊號之一。「帶量」是關鍵——無量的突破隨時可能拉回，帶量突破代表大量買家在更高價格達成共識，上漲動能充沛。建議：可在突破當下追入30%部位，停損設在突破點下方。強勢突破往往不給回測機會，不要猶豫等待。');
+            } else if (isShrinkingTurnover && isMacdPositive) {
+                // Signal: 炒作中繼整理 — 中段縮量蓄勢（新增綠燈）
+                light = 'green';
+                signalTag = '中段縮量整理';
+                rules.push('股價上漲一段後進入橫盤整理，成交量大幅萎縮（低於均量0.5倍），MACD動能持續為正。這是主力刻意壓盤洗清浮額的「中繼整理」型態，籌碼高度集中，主力並未出貨。建議：持股者耐心持有，這是最不應該賣出的時機。等待量能再度放大（超過均量1.5倍以上）、股價重新向上突破整理區間，通常迎來更強的第二波拉升。');
             } else if (isShrinkingTurnover) {
-                // Signal 4 in middle zone: 上漲中繼縮量洗盤
+                // 中位量縮但MACD未確認
                 light = 'yellow';
-                rules.push('縮量洗盤，籌碼鎖定良好，靜待量增再起。');
+                signalTag = '中位量縮觀察';
+                rules.push('中位成交量萎縮，股價暫時停頓。量縮本身不代表危險，但MACD動能尚未確認向上，方向仍不明朗。建議：已持股者可繼續持有，但暫不加碼。未持股者觀望為主，等待MACD轉正或量能放大後再評估進場時機。');
             } else {
                 light = 'yellow';
-                rules.push('價穩量縮，方向待表態。');
+                signalTag = '中位方向待定';
+                rules.push('股價在中間位置橫盤，量能平穩無特殊變化，市場多空雙方都在等待驅動方向的訊號。建議：切忌在無量的中途隨意追入，等待帶量突破（向上）或量增跌破支撐（向下）後，再根據方向決定操作。');
             }
         }
 

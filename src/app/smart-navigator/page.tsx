@@ -163,11 +163,23 @@ function ResultCard({ result, stockId, stockName }: { result: any, stockId: stri
     return (
         <div className="animate-in fade-in slide-in-from-bottom-8 duration-700 space-y-6 mb-12">
             {/* Stock Title */}
-            <div className="flex items-center gap-3 mb-2">
+            <div className="flex items-center gap-3 mb-2 flex-wrap">
                 <div className="bg-indigo-500/20 text-indigo-400 px-4 py-2 rounded-xl font-black border border-indigo-500/30 text-xl">
                     {stockId}
                 </div>
                 {stockName && <div className="text-2xl font-black text-white">{stockName}</div>}
+                {result.signalTag && (
+                    <div className={`px-3 py-1.5 rounded-xl font-black text-sm border flex items-center gap-1.5 ${
+                        result.light === 'green'
+                            ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                            : result.light === 'red'
+                            ? 'bg-rose-500/15 border-rose-500/40 text-rose-300'
+                            : 'bg-amber-500/15 border-amber-500/40 text-amber-300'
+                    }`}>
+                        <span>{result.light === 'green' ? '🟢' : result.light === 'red' ? '🔴' : '🟡'}</span>
+                        {result.signalTag}
+                    </div>
+                )}
             </div>
 
             {/* Traffic Light */}
