@@ -80,72 +80,6 @@ export async function GET(request: Request) {
         const upperShadow = latestHigh - Math.max(latestClose, latestOpen);
         const hasLongUpperShadow = body > 0 && upperShadow > body * 2;
 
-        // === Distribution Warning: Three Precursor Signals ===
-
-        // Precursor A: MACD Top Divergence (MACD頂背離)
-        // Price at or above a recent high, but DIF is lower than at that peak
-        let hasMacdDivergence = false;
-        const macdFull = calculateMACDFull(closePrices);
-        if (macdFull && closePrices.length >= 26) {
-            const lookback = 20;
-            const recentPrices = closePrices.slice(-lookback);
-            const recentDif = macdFull.difArray.slice(-lookback);
-            // Find the highest local peak in the 2nd to 2nd-to-last bar range
-            let prevPeakIdx = -1;
-            let prevPeakPrice = -Infinity;
-            for (let i = 1; i < lookback - 2; i++) {
-                if (recentPrices[i] > recentPrices[i - 1] && recentPrices[i] >= recentPrices[i + 1]) {
-                    if (recentPrices[i] > prevPeakPrice) {
-                        prevPeakPrice = recentPrices[i];
-                        prevPeakIdx = i;
-                    }
-                }
-            }
-            if (prevPeakIdx !== -1) {
-                const currentPrice = recentPrices[lookback - 1];
-                const currentDif = recentDif[lookback - 1];
-                const prevPeakDif = recentDif[prevPeakIdx];
-                // Divergence: price near or above previous peak, but DIF is weaker
-                hasMacdDivergence = currentPrice >= prevPeakPrice * 0.98 && currentDif < prevPeakDif;
-            }
-        }
-
-        // Precursor B: Volume Decline at High Position (高位量能遞減)
-        // At high position, 5-day volume is declining and below 10-day average
-        let isVolumeDeclineAtHigh = false;
-        if (positionPercent > 60 && volumesInShares.length >= 10) {
-            const last5Vol = volumesInShares.slice(-5);
-            const decliningCount = last5Vol.filter((v, i) => i > 0 && v < last5Vol[i - 1]).length;
-            const vol5Avg = last5Vol.reduce((a, b) => a + b, 0) / 5;
-            const vol10Avg = volumesInShares.slice(-10).reduce((a, b) => a + b, 0) / 10;
-            isVolumeDeclineAtHigh = decliningCount >= 3 && vol5Avg < vol10Avg;
-        }
-
-        // Precursor C: High Position Stagnation (高位橫盤滞漲)
-        // At high position, price hasn't made a new high for >= 5 trading days
-        let highStagnationDays = 0;
-        if (positionPercent > 60 && prices.length >= 10) {
-            const recentPricesSlice = prices.slice(-10);
-            const maxHighInSlice = Math.max(...recentPricesSlice.map(p => p.max));
-            const lastIndexOfHigh = recentPricesSlice.map(p => p.max).lastIndexOf(maxHighInSlice);
-            highStagnationDays = recentPricesSlice.length - 1 - lastIndexOfHigh;
-        }
-        const isHighStagnant = highStagnationDays >= 5;
-
-        // Composite Distribution Warning Level
-        const distributionPrecursorCount = [hasMacdDivergence, isVolumeDeclineAtHigh, isHighStagnant].filter(Boolean).length;
-        // watch: 1 signal at high zone; warning: 2+ signals; alert: 2+ signals + active high turnover
-        let distributionLevel: 'none' | 'watch' | 'warning' | 'alert' = 'none';
-        if (positionPercent > 60) {
-            if (distributionPrecursorCount >= 2 && (isHighTurnover || isExtremelyHighTurnover) && positionPercent > 70) {
-                distributionLevel = 'alert';
-            } else if (distributionPrecursorCount >= 2) {
-                distributionLevel = 'warning';
-            } else if (distributionPrecursorCount === 1) {
-                distributionLevel = 'watch';
-            }
-        }
-
         // Calculate 20MA
         const reversedClose = [...closePrices].reverse();
         const ma20 = calculateSMA(reversedClose, 20);
@@ -179,6 +113,68 @@ export async function GET(request: Request) {
             const vol5MA = calculateSMA(reversedVolume, 5);
             isHighTurnover = vol5MA ? latestVolumeShares > (vol5MA * 2) : false;
             isExtremelyHighTurnover = vol5MA ? latestVolumeShares > (vol5MA * 4) : false;
+        }
+
+        // === Distribution Warning: Three Precursor Signals ===
+        // (Placed after positionPercent & isHighTurnover to avoid 'used before declaration' error)
+
+        // Precursor A: MACD Top Divergence (MACD頂背離)
+        // Price at or above a recent high, but DIF is lower than at that peak
+        let hasMacdDivergence = false;
+        const macdFull = calculateMACDFull(closePrices);
+        if (macdFull && closePrices.length >= 26) {
+            const lookback = 20;
+            const recentPrices = closePrices.slice(-lookback);
+            const recentDif = macdFull.difArray.slice(-lookback);
+            let prevPeakIdx = -1;
+            let prevPeakPrice = -Infinity;
+            for (let i = 1; i < lookback - 2; i++) {
+                if (recentPrices[i] > recentPrices[i - 1] && recentPrices[i] >= recentPrices[i + 1]) {
+                    if (recentPrices[i] > prevPeakPrice) {
+                        prevPeakPrice = recentPrices[i];
+                        prevPeakIdx = i;
+                    }
+                }
+            }
+            if (prevPeakIdx !== -1) {
+                const currentPrice = recentPrices[lookback - 1];
+                const currentDif = recentDif[lookback - 1];
+                const prevPeakDif = recentDif[prevPeakIdx];
+                hasMacdDivergence = currentPrice >= prevPeakPrice * 0.98 && currentDif < prevPeakDif;
+            }
+        }
+
+        // Precursor B: Volume Decline at High Position (高位量能遞減)
+        let isVolumeDeclineAtHigh = false;
+        if (positionPercent > 60 && volumesInShares.length >= 10) {
+            const last5Vol = volumesInShares.slice(-5);
+            const decliningCount = last5Vol.filter((v, i) => i > 0 && v < last5Vol[i - 1]).length;
+            const vol5Avg = last5Vol.reduce((a, b) => a + b, 0) / 5;
+            const vol10Avg = volumesInShares.slice(-10).reduce((a, b) => a + b, 0) / 10;
+            isVolumeDeclineAtHigh = decliningCount >= 3 && vol5Avg < vol10Avg;
+        }
+
+        // Precursor C: High Position Stagnation (高位橫盤滞漲)
+        let highStagnationDays = 0;
+        if (positionPercent > 60 && prices.length >= 10) {
+            const recentPricesSlice = prices.slice(-10);
+            const maxHighInSlice = Math.max(...recentPricesSlice.map(p => p.max));
+            const lastIndexOfHigh = recentPricesSlice.map(p => p.max).lastIndexOf(maxHighInSlice);
+            highStagnationDays = recentPricesSlice.length - 1 - lastIndexOfHigh;
+        }
+        const isHighStagnant = highStagnationDays >= 5;
+
+        // Composite Distribution Warning Level
+        const distributionPrecursorCount = [hasMacdDivergence, isVolumeDeclineAtHigh, isHighStagnant].filter(Boolean).length;
+        let distributionLevel: 'none' | 'watch' | 'warning' | 'alert' = 'none';
+        if (positionPercent > 60) {
+            if (distributionPrecursorCount >= 2 && (isHighTurnover || isExtremelyHighTurnover) && positionPercent > 70) {
+                distributionLevel = 'alert';
+            } else if (distributionPrecursorCount >= 2) {
+                distributionLevel = 'warning';
+            } else if (distributionPrecursorCount === 1) {
+                distributionLevel = 'watch';
+            }
         }
 
         // Prices
