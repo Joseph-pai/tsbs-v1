@@ -401,6 +401,7 @@ export default function SmartNavigatorPage() {
     const [filterProgress, setFilterProgress] = useState({ current: 0, total: 0, phase: '' });
     const [filterResults, setFilterResults] = useState<Array<{stockId: string, stockName: string, data: any}>>([]);
     const [filterCompleted, setFilterCompleted] = useState(false);
+    const [filterMode, setFilterMode] = useState<'green' | 'distribution'>('green');
 
     // Print State
     const [isPrinting, setIsPrinting] = useState(false);
@@ -511,8 +512,9 @@ export default function SmartNavigatorPage() {
             }
 
             const BATCH_SIZE = 5;
-            const validResults = [];
+            const validResults: any[] = [];
             const maxPosPercent = parseInt(maxPosition, 10);
+            const levelOrder: Record<string, number> = { alert: 0, warning: 1, watch: 2 };
 
             for (let i = 0; i < uniqueStocks.length; i += BATCH_SIZE) {
                 const batch = uniqueStocks.slice(i, i + BATCH_SIZE);
@@ -527,16 +529,15 @@ export default function SmartNavigatorPage() {
                         const res = await fetch(`/api/smart-navigator?stockId=${stock.id}&period=${autoPeriod}`);
                         const json = await res.json();
                         if (json.success && json.data) {
-                            // Progressive Filter
-                            // 1. Easy filter: max position
-                            if (json.data.metrics && json.data.metrics.positionPercent <= maxPosPercent) {
-                                // 2. Green light filter
-                                if (json.data.light === 'green') {
-                                    return {
-                                        stockId: stock.id,
-                                        stockName: stock.name,
-                                        data: json.data
-                                    };
+                            if (filterMode === 'green') {
+                                if (json.data.metrics && json.data.metrics.positionPercent <= maxPosPercent) {
+                                    if (json.data.light === 'green') {
+                                        return { stockId: stock.id, stockName: stock.name, data: json.data, distributionLevel: null };
+                                    }
+                                }
+                            } else {
+                                if (json.data.distribution && json.data.distribution.level !== 'none') {
+                                    return { stockId: stock.id, stockName: stock.name, data: json.data, distributionLevel: json.data.distribution.level };
                                 }
                             }
                         }
@@ -548,6 +549,10 @@ export default function SmartNavigatorPage() {
 
                 const resolved = await Promise.all(batchPromises);
                 validResults.push(...resolved.filter(r => r !== null));
+            }
+
+            if (filterMode === 'distribution') {
+                validResults.sort((a, b) => (levelOrder[a.distributionLevel] ?? 3) - (levelOrder[b.distributionLevel] ?? 3));
             }
 
             setFilterProgress({ current: uniqueStocks.length, total: uniqueStocks.length, phase: '分析完成' });
@@ -637,7 +642,7 @@ export default function SmartNavigatorPage() {
                         <div className="mt-6 pt-6 border-t border-slate-800 animate-in slide-in-from-top-4 fade-in duration-300">
                             <div className="flex items-center gap-2 mb-4 text-amber-400 font-bold">
                                 <SparklesIcon className="w-5 h-5" />
-                                歷史數據自動篩選 (僅顯示綠燈)
+                                歷史數據自動篩選
                             </div>
                             
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -656,6 +661,24 @@ export default function SmartNavigatorPage() {
                                 
                                 {/* Right: Settings */}
                                 <div className="space-y-4">
+                                    {/* Mode Toggle */}
+                                    <div>
+                                        <div className="text-sm text-slate-400 mb-2 font-medium">1. 篹選模式</div>
+                                        <div className="flex gap-2">
+                                            <button
+                                                onClick={() => setFilterMode('green')}
+                                                className={`flex-1 py-2.5 rounded-xl text-sm font-black border transition-all ${filterMode === 'green' ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400' : 'bg-black/40 border-slate-700 text-slate-400 hover:bg-slate-800'}`}
+                                            >
+                                                🟢 綠燈選股
+                                            </button>
+                                            <button
+                                                onClick={() => setFilterMode('distribution')}
+                                                className={`flex-1 py-2.5 rounded-xl text-sm font-black border transition-all ${filterMode === 'distribution' ? 'bg-rose-500/20 border-rose-500 text-rose-400' : 'bg-black/40 border-slate-700 text-slate-400 hover:bg-slate-800'}`}
+                                            >
+                                                ⚠️ 出貨預警
+                                            </button>
+                                        </div>
+                                    </div>
                                     <div>
                                         <div className="text-sm text-slate-400 mb-2 font-medium">2. 數據日期區間</div>
                                         <div className="grid grid-cols-4 gap-2">
@@ -670,20 +693,22 @@ export default function SmartNavigatorPage() {
                                             ))}
                                         </div>
                                     </div>
-                                    <div>
-                                        <div className="text-sm text-slate-400 mb-2 font-medium">3. 過濾條件: 相對高位小於</div>
-                                        <div className="grid grid-cols-3 gap-2">
-                                            {['50', '60', '70'].map(pos => (
-                                                <button
-                                                    key={pos}
-                                                    onClick={() => setMaxPosition(pos)}
-                                                    className={`py-2 rounded-lg text-sm font-bold border transition-colors ${maxPosition === pos ? 'bg-amber-500/20 border-amber-500 text-amber-400' : 'bg-black/40 border-slate-700 text-slate-400 hover:bg-slate-800'}`}
-                                                >
-                                                    {pos}%
-                                                </button>
-                                            ))}
+                                    {filterMode === 'green' && (
+                                        <div>
+                                            <div className="text-sm text-slate-400 mb-2 font-medium">3. 過濾條件: 相對高位小於</div>
+                                            <div className="grid grid-cols-3 gap-2">
+                                                {['50', '60', '70'].map(pos => (
+                                                    <button
+                                                        key={pos}
+                                                        onClick={() => setMaxPosition(pos)}
+                                                        className={`py-2 rounded-lg text-sm font-bold border transition-colors ${maxPosition === pos ? 'bg-amber-500/20 border-amber-500 text-amber-400' : 'bg-black/40 border-slate-700 text-slate-400 hover:bg-slate-800'}`}
+                                                    >
+                                                        {pos}%
+                                                    </button>
+                                                ))}
+                                            </div>
                                         </div>
-                                    </div>
+                                    )}
                                     
                                     <button
                                         onClick={handleAutoFilter}
@@ -741,22 +766,37 @@ export default function SmartNavigatorPage() {
                     <div className="animate-in fade-in slide-in-from-bottom-8 duration-700">
                         <div className="flex items-center gap-3 mb-8">
                             <div className="h-[1px] flex-1 bg-slate-800"></div>
-                            <div className="text-amber-400 font-black tracking-widest text-lg">
-                                篩選結果 ({filterResults.length} 檔)
+                            <div className={`font-black tracking-widest text-lg ${filterMode === 'distribution' ? 'text-rose-400' : 'text-amber-400'}`}>
+                                {filterMode === 'distribution'
+                                    ? `出貨預警結果 (${filterResults.length} 檔)`
+                                    : `篩選結果 (${filterResults.length} 檔)`
+                                }
                             </div>
                             <div className="h-[1px] flex-1 bg-slate-800"></div>
                         </div>
 
                         {filterResults.length > 0 ? (
                             <div className="space-y-4">
-                                {filterResults.map((res, idx) => (
-                                    <ResultCard 
-                                        key={`${res.stockId}-${idx}`} 
-                                        result={res.data} 
-                                        stockId={res.stockId} 
-                                        stockName={res.stockName} 
-                                    />
-                                ))}
+                                {filterResults.map((res: any, idx: number) => {
+                                    const lvl = res.distributionLevel;
+                                    const badge = lvl === 'alert'
+                                        ? { text: '🔴 出貨進行中', cls: 'text-rose-400 border-rose-500/40 bg-rose-500/10' }
+                                        : lvl === 'warning'
+                                        ? { text: '🟠 出貨準備前兆', cls: 'text-orange-400 border-orange-500/40 bg-orange-500/10' }
+                                        : lvl === 'watch'
+                                        ? { text: '🟡 留意觀察', cls: 'text-amber-400 border-amber-500/40 bg-amber-500/10' }
+                                        : null;
+                                    return (
+                                        <div key={`${res.stockId}-${idx}`}>
+                                            {badge && filterMode === 'distribution' && (
+                                                <div className={`mb-2 px-4 py-2 rounded-xl border font-black text-sm ${badge.cls}`}>
+                                                    {badge.text}
+                                                </div>
+                                            )}
+                                            <ResultCard result={res.data} stockId={res.stockId} stockName={res.stockName} />
+                                        </div>
+                                    );
+                                })}
                             </div>
                         ) : (
                             <div className="bg-slate-900 border border-slate-800 rounded-3xl p-12 text-center shadow-2xl">
@@ -765,8 +805,10 @@ export default function SmartNavigatorPage() {
                                 </div>
                                 <h3 className="text-2xl font-black text-slate-300 mb-2">無符合條件</h3>
                                 <p className="text-slate-500">
-                                    在選定日期的掃描紀錄中，沒有找到符合目前綠燈標準的股票。<br />
-                                    您可以嘗試放寬「數據日期區間」或「相對高位%值」，或者選擇其他日期。
+                                    {filterMode === 'distribution'
+                                        ? '在選定日期的掃描紀錄中，沒有發現出現出貨預警訊號的股票。可嘗試選擇其他日期。'
+                                        : '在選定日期的掃描紀錄中，沒有找到符合目前綠燈標準的股票。您可以嘗試放寬「數據日期區間」或「相對高位%值」，或者選擇其他日期。'
+                                    }
                                 </p>
                             </div>
                         )}
