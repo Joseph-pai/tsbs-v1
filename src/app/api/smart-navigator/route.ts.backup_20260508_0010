@@ -177,19 +177,6 @@ export async function GET(request: Request) {
             }
         }
 
-        // === Early Accumulation Signals ===
-        // Moderate volume: turnover 1.2x ~ 2x avg (warming up, not yet high)
-        const isModerateVolume = avg20Turnover > 0
-            ? turnoverRate > avg20Turnover * 1.2 && turnoverRate <= avg20Turnover * 2
-            : false;
-        // MACD just turned positive: prev DIF < 0, current DIF >= 0
-        let isMacdJustTurnedPositive = false;
-        if (macdFull && macdFull.difArray.length >= 2) {
-            const prevDif = macdFull.difArray[macdFull.difArray.length - 2];
-            const currDif = macdFull.difArray[macdFull.difArray.length - 1];
-            isMacdJustTurnedPositive = prevDif < 0 && currDif >= 0;
-        }
-
         // Prices
         const buyPrice = Number(((latestHigh + latestLow) / 2).toFixed(2));
         const stopLossPrice = Number((ma20 || latestLow).toFixed(2));
@@ -197,7 +184,6 @@ export async function GET(request: Request) {
         const tp2Price = Number((buyPrice * 1.50).toFixed(2));
 
         // Logic Status
-        let signalTag: string | null = null;
         let light = 'red';
         const rules: string[] = [];
 
@@ -218,27 +204,16 @@ export async function GET(request: Request) {
             // Low position zone
             rules.push(`目前股價處於近 ${period} 日相對低位（<30%）。`);
             if (isHighTurnover) {
+                // Signal 1: Low position + high turnover = 主力吸籌建倉
                 light = 'green';
-                signalTag = '低位放量建倉';
-                rules.push('成交量明顯放大（超過近期均量2倍），主力正積極在低檔承接籌碼。建議：可分批買入，第一批買入30%部位，剩餘等量能持續放大後再加碼，以當日最低價為停損參考。');
-            } else if (isShrinkingTurnover && isMacdPositive) {
-                light = 'green';
-                signalTag = '低位縮量蓄勢';
-                rules.push('低位成交量大幅縮小，代表願意賣出的人越來越少，籌碼正在集中。MACD動能指標為正，顯示趨勢轉多。建議：少量試單（10%～20%部位），耐心等待成交量明顯放大再積極加碼。');
-            } else if (isModerateVolume && isMacdPositive) {
-                light = 'green';
-                signalTag = '底部量能回升';
-                rules.push('底部成交量溫和回升（約為近期均量1.2~2倍），已有資金開始試探性進場，MACD動能轉正。建議：少量布局（10%～20%），若後續量能持續放大則逐步加碼至50%部位。');
-            } else if (isMacdJustTurnedPositive && positionPercent < 20) {
-                light = 'green';
-                signalTag = 'MACD低位轉正';
-                rules.push('MACD動能指標剛從負值轉為正值，且股價處於極低位置，是技術面「由跌轉漲」的關鍵轉折訊號。建議：少量試單（10%～15%），以20日均線為停損，確認量能跟上後再加碼。');
+                rules.push('主力積極換手，底部量增，建議分批佈局。');
             } else if (isShrinkingTurnover) {
+                // Signal 4 in low zone: 縮量整理蓄勢
                 light = 'yellow';
-                rules.push('低位成交縮小，市場觀望情緒濃厚。建議：觀望為主，可少量逢低試探，但不宜重倉，等待明確放量訊號。');
+                rules.push('低位量縮整理，可逢低少量試單。');
             } else {
                 light = 'yellow';
-                rules.push('低位整理中，量能未有明顯變化。建議：列入觀察清單，等待成交量明顯放大或MACD轉正後再考慮介入。');
+                rules.push('低位量縮整理，可逢低少量試單。');
             }
         } else if (positionPercent > 70) {
             // High position zone
@@ -291,7 +266,6 @@ export async function GET(request: Request) {
         // Final strict red override: breaking below MA20 always = red
         if (ma20 && latestClose < ma20) {
             light = 'red';
-            signalTag = null; // Reset signal tag when overridden to red
         }
 
         // Turnover rate display with dynamic baseline info
@@ -311,7 +285,6 @@ export async function GET(request: Request) {
                 stockId,
                 stockName,
                 light,
-                signalTag,
                 prices: {
                     buy: buyPrice,
                     stopLoss: stopLossPrice,
