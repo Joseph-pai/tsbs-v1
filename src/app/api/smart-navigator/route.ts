@@ -51,6 +51,35 @@ export async function GET(request: Request) {
             turnoverRate = (latestVolumeShares / totalShares) * 100;
         }
 
+        // Calculate 20-day average turnover rate as dynamic baseline
+        let avg20Turnover = 0;
+        if (totalShares && totalShares > 0) {
+            const last20 = prices.slice(-20);
+            const turnoverRates20 = last20.map(p => (p.Trading_Volume * 1000 / totalShares) * 100);
+            avg20Turnover = turnoverRates20.reduce((a, b) => a + b, 0) / turnoverRates20.length;
+        }
+
+        // Calculate turnover multiple (current vs 20-day average)
+        const turnoverMultiple = avg20Turnover > 0 ? turnoverRate / avg20Turnover : 0;
+
+        // Calculate 5-day turnover trend for Signal 4 (洗盤縮量) & Signal 5 (對倒震盪)
+        let last5TurnoverRates: number[] = [];
+        if (totalShares && totalShares > 0) {
+            last5TurnoverRates = prices.slice(-5).map(p => (p.Trading_Volume * 1000 / totalShares) * 100);
+        }
+        // Signal 5: All 5 days are above 1.5x average (persistent high turnover)
+        const isTrending5DayHighTurnover = last5TurnoverRates.length === 5 && avg20Turnover > 0 &&
+            last5TurnoverRates.every(r => r > avg20Turnover * 1.5);
+        // Signal 4: Latest day turnover shrinks to below 0.5x average (locking chips)
+        const isShrinkingTurnover = last5TurnoverRates.length > 0 && avg20Turnover > 0 &&
+            last5TurnoverRates[last5TurnoverRates.length - 1] < avg20Turnover * 0.5;
+
+        // Long upper shadow K-bar detection for Signal 2 refinement (高位長上影線)
+        const latestOpen = latestData.open;
+        const body = Math.abs(latestClose - latestOpen);
+        const upperShadow = latestHigh - Math.max(latestClose, latestOpen);
+        const hasLongUpperShadow = body > 0 && upperShadow > body * 2;
+
         // Calculate 20MA
         const reversedClose = [...closePrices].reverse();
         const ma20 = calculateSMA(reversedClose, 20);
@@ -65,14 +94,19 @@ export async function GET(request: Request) {
         const periodMin = Math.min(...periodPrices);
         const positionPercent = periodMax === periodMin ? 0 : ((latestClose - periodMin) / (periodMax - periodMin)) * 100;
 
-        // Calculate Turnover Heat
-        // Fallback to relative volume if totalShares is unavailable
+        // Calculate Turnover Heat (dynamic thresholds based on 20-day average)
         let isHighTurnover = false;
         let isExtremelyHighTurnover = false;
-        
-        if (totalShares && totalShares > 0) {
-            isHighTurnover = turnoverRate > 5; // > 5%
-            isExtremelyHighTurnover = turnoverRate > 25; // > 25%
+
+        if (totalShares && totalShares > 0 && avg20Turnover > 0) {
+            // Dynamic: current > 2x 20-day average = high turnover
+            isHighTurnover = turnoverRate > avg20Turnover * 2;
+            // Dynamic: current > 4x 20-day average = extremely high turnover
+            isExtremelyHighTurnover = turnoverRate > avg20Turnover * 4;
+        } else if (totalShares && totalShares > 0) {
+            // Static fallback when avg20 is unavailable
+            isHighTurnover = turnoverRate > 5;
+            isExtremelyHighTurnover = turnoverRate > 25;
         } else {
             // Fallback: compare to 5MA volume
             const reversedVolume = [...volumesInShares].reverse();
@@ -91,34 +125,57 @@ export async function GET(request: Request) {
         let light = 'red';
         const rules: string[] = [];
 
-        // Rules text generation
+        // Rule: MA20 trend check
         if (ma20 && latestClose < ma20) {
             rules.push('股價跌破 20 日均線，趨勢偏弱，請嚴格執行停損或觀望。');
         } else {
             rules.push('股價穩站 20 日均線之上，多頭格局維持。');
         }
 
+        // Rule: MACD momentum
         if (isMacdPositive) {
             rules.push('MACD 維持零軸之上，具備上漲動能。');
         }
 
+        // Rule: Five Signal Detection (Position + Turnover relationship)
         if (positionPercent < 30) {
+            // Low position zone
             rules.push(`目前股價處於近 ${period} 日相對低位（<30%）。`);
             if (isHighTurnover) {
+                // Signal 1: Low position + high turnover = 主力吸籌建倉
                 light = 'green';
                 rules.push('主力積極換手，底部量增，建議分批佈局。');
+            } else if (isShrinkingTurnover) {
+                // Signal 4 in low zone: 縮量整理蓄勢
+                light = 'yellow';
+                rules.push('低位量縮整理，可逢低少量試單。');
             } else {
                 light = 'yellow';
                 rules.push('低位量縮整理，可逢低少量試單。');
             }
         } else if (positionPercent > 70) {
+            // High position zone
             rules.push(`目前股價處於近 ${period} 日相對高位（>70%）。`);
-            if (isExtremelyHighTurnover) {
+            if (isExtremelyHighTurnover || (isHighTurnover && hasLongUpperShadow)) {
+                // Signal 2: High position + extreme turnover or long upper shadow = 主力派發出貨
                 light = 'red';
-                rules.push('高位爆出天量，主力疑似出貨，請提高警覺嚴格停損！');
+                if (hasLongUpperShadow) {
+                    rules.push('高位長上影線放量，主力疑似出貨，請提高警覺嚴格停損！');
+                } else {
+                    rules.push('高位爆出天量，主力疑似出貨，請提高警覺嚴格停損！');
+                }
+            } else if (isTrending5DayHighTurnover) {
+                // Signal 5 in high zone: 連續高換手震盪 = 對倒或洗盤
+                light = 'yellow';
+                rules.push('連續換手股價停滯，疑似主力對倒洗籌，觀察突破方向再決策。');
             } else if (isHighTurnover) {
-                light = 'yellow'; // High position, high turnover can be risky
+                // High turnover at high position, not extreme
+                light = 'yellow';
                 rules.push('高位換手熱烈，請留意追高風險。');
+            } else if (isShrinkingTurnover) {
+                // Signal 4 in high zone: 籌碼鎖定惜售
+                light = 'yellow';
+                rules.push('高位量縮，籌碼相對穩定，建議持股續抱。');
             } else {
                 light = 'yellow';
                 rules.push('高位量縮，籌碼相對穩定，建議持股續抱。');
@@ -126,22 +183,36 @@ export async function GET(request: Request) {
         } else {
             // Middle position 30~70
             rules.push(`目前股價處於近 ${period} 日中階位置。`);
-            if (isHighTurnover) {
+            if (isTrending5DayHighTurnover && !isHighTurnover) {
+                // Signal 5 in middle zone: 連續換手但今日未特別放量
+                light = 'yellow';
+                rules.push('連續換手股價停滯，疑似主力對倒洗籌，觀察突破方向再決策。');
+            } else if (isHighTurnover) {
+                // Signal 3: Middle position + high turnover = 強勢突破拉升
                 light = 'green';
                 rules.push('帶量突破盤整區，動能轉強。');
+            } else if (isShrinkingTurnover) {
+                // Signal 4 in middle zone: 上漲中繼縮量洗盤
+                light = 'yellow';
+                rules.push('縮量洗盤，籌碼鎖定良好，靜待量增再起。');
             } else {
                 light = 'yellow';
                 rules.push('價穩量縮，方向待表態。');
             }
         }
 
-        // Final strict red overrides
+        // Final strict red override: breaking below MA20 always = red
         if (ma20 && latestClose < ma20) {
             light = 'red';
         }
 
+        // Turnover rate display with dynamic baseline info
         if (totalShares && totalShares > 0) {
-            rules.push(`(真實換手率: ${turnoverRate.toFixed(2)}%)`);
+            if (avg20Turnover > 0) {
+                rules.push(`(真實換手率: ${turnoverRate.toFixed(2)}%，20日均: ${avg20Turnover.toFixed(2)}%，為均值 ${turnoverMultiple.toFixed(1)} 倍)`);
+            } else {
+                rules.push(`(真實換手率: ${turnoverRate.toFixed(2)}%)`);
+            }
         } else {
             rules.push(`(因缺少總股本資料，使用5日均量比對換手熱度)`);
         }
@@ -164,6 +235,8 @@ export async function GET(request: Request) {
                     positionPercent: Number(positionPercent.toFixed(1)),
                     isHighTurnover,
                     turnoverRate: turnoverRate > 0 ? Number(turnoverRate.toFixed(2)) : null,
+                    avg20Turnover: avg20Turnover > 0 ? Number(avg20Turnover.toFixed(2)) : null,
+                    turnoverMultiple: turnoverMultiple > 0 ? Number(turnoverMultiple.toFixed(1)) : null,
                     isStopLossFallback: !ma20
                 },
                 interpretations: rules,
