@@ -1,0 +1,346 @@
+import { NextResponse } from 'next/server';
+import { ExchangeClient } from '@/lib/exchange';
+import { getTotalShares } from '@/lib/shares';
+import { calculateSMA, calculateMACD, calculateMACDFull } from '@/services/indicators';
+
+export async function GET(request: Request) {
+    try {
+        const { searchParams } = new URL(request.url);
+        const stockId = searchParams.get('stockId');
+        const periodStr = searchParams.get('period') || '30';
+        const period = parseInt(periodStr, 10);
+
+        if (!stockId) {
+            return NextResponse.json({ success: false, error: 'Missing stockId' }, { status: 400 });
+        }
+
+        // Fetch 6 months of data directly from Exchange to avoid FinMind API limits
+        const prices = await ExchangeClient.getStockHistory(stockId, 6);
+
+        if (!prices || prices.length === 0) {
+            return NextResponse.json({ success: false, error: '無法獲取該股票的歷史交易數據，請確認代號是否正確。' }, { status: 404 });
+        }
+
+        // Extract close prices and volumes (ordered from oldest to newest)
+        const closePrices = prices.map(p => p.close);
+        // Convert Volume back to shares (ExchangeClient returns volume in thousands (張), except TPEx History API sometimes returns shares. 
+        // Wait, ExchangeClient normalizes volume to "thousands (張)" for TWSE, but let's check its logic: 
+        // TWSE daily: `parseNum(row[1]) / 1000`
+        // TPEx daily: `parseNum(row[1])` (Wait, TPEx history returns volume in thousands (仟股)? Yes, `parseNum(row[1])` means thousands. So both are in thousands. We need to multiply by 1000 to get shares).
+        const volumesInShares = prices.map(p => p.Trading_Volume * 1000);
+
+        const latestData = prices[prices.length - 1];
+        const latestClose = latestData.close;
+        const latestHigh = latestData.max;
+        const latestLow = latestData.min;
+        const latestVolumeShares = latestData.Trading_Volume * 1000;
+
+        // Fetch stock name (cached after first call per server instance)
+        let stockName = stockId;
+        try {
+            await ExchangeClient.getIndustryMapping(); // populates _stockNameCache
+            stockName = ExchangeClient.getStockName(stockId) || stockId;
+        } catch (_) { /* fallback to stockId if name lookup fails */ }
+
+        // Fetch Total Outstanding Shares
+        const totalShares = await getTotalShares(stockId);
+        
+        // Calculate Real Turnover Rate (%)
+        let turnoverRate = 0;
+        if (totalShares && totalShares > 0) {
+            turnoverRate = (latestVolumeShares / totalShares) * 100;
+        }
+
+        // Calculate 20-day average turnover rate as dynamic baseline
+        let avg20Turnover = 0;
+        if (totalShares && totalShares > 0) {
+            const last20 = prices.slice(-20);
+            const turnoverRates20 = last20.map(p => (p.Trading_Volume * 1000 / totalShares) * 100);
+            avg20Turnover = turnoverRates20.reduce((a, b) => a + b, 0) / turnoverRates20.length;
+        }
+
+        // Calculate turnover multiple (current vs 20-day average)
+        const turnoverMultiple = avg20Turnover > 0 ? turnoverRate / avg20Turnover : 0;
+
+        // Calculate 5-day turnover trend for Signal 4 (洗盤縮量) & Signal 5 (對倒震盪)
+        let last5TurnoverRates: number[] = [];
+        if (totalShares && totalShares > 0) {
+            last5TurnoverRates = prices.slice(-5).map(p => (p.Trading_Volume * 1000 / totalShares) * 100);
+        }
+        // Signal 5: All 5 days are above 1.5x average (persistent high turnover)
+        const isTrending5DayHighTurnover = last5TurnoverRates.length === 5 && avg20Turnover > 0 &&
+            last5TurnoverRates.every(r => r > avg20Turnover * 1.5);
+        // Signal 4: Latest day turnover shrinks to below 0.5x average (locking chips)
+        const isShrinkingTurnover = last5TurnoverRates.length > 0 && avg20Turnover > 0 &&
+            last5TurnoverRates[last5TurnoverRates.length - 1] < avg20Turnover * 0.5;
+
+        // Long upper shadow K-bar detection for Signal 2 refinement (高位長上影線)
+        const latestOpen = latestData.open;
+        const body = Math.abs(latestClose - latestOpen);
+        const upperShadow = latestHigh - Math.max(latestClose, latestOpen);
+        const hasLongUpperShadow = body > 0 && upperShadow > body * 2;
+
+        // Calculate 20MA
+        const reversedClose = [...closePrices].reverse();
+        const ma20 = calculateSMA(reversedClose, 20);
+
+        // Calculate MACD
+        const macdData = calculateMACD(closePrices);
+        const isMacdPositive = macdData ? macdData.dif > 0 : false;
+
+        // Calculate Position %
+        const periodPrices = reversedClose.slice(0, period);
+        const periodMax = Math.max(...periodPrices);
+        const periodMin = Math.min(...periodPrices);
+        const positionPercent = periodMax === periodMin ? 0 : ((latestClose - periodMin) / (periodMax - periodMin)) * 100;
+
+        // Calculate Turnover Heat (dynamic thresholds based on 20-day average)
+        let isHighTurnover = false;
+        let isExtremelyHighTurnover = false;
+
+        if (totalShares && totalShares > 0 && avg20Turnover > 0) {
+            // Dynamic: current > 2x 20-day average = high turnover
+            isHighTurnover = turnoverRate > avg20Turnover * 2;
+            // Dynamic: current > 4x 20-day average = extremely high turnover
+            isExtremelyHighTurnover = turnoverRate > avg20Turnover * 4;
+        } else if (totalShares && totalShares > 0) {
+            // Static fallback when avg20 is unavailable
+            isHighTurnover = turnoverRate > 5;
+            isExtremelyHighTurnover = turnoverRate > 25;
+        } else {
+            // Fallback: compare to 5MA volume
+            const reversedVolume = [...volumesInShares].reverse();
+            const vol5MA = calculateSMA(reversedVolume, 5);
+            isHighTurnover = vol5MA ? latestVolumeShares > (vol5MA * 2) : false;
+            isExtremelyHighTurnover = vol5MA ? latestVolumeShares > (vol5MA * 4) : false;
+        }
+
+        // === Distribution Warning: Three Precursor Signals ===
+        // (Placed after positionPercent & isHighTurnover to avoid 'used before declaration' error)
+
+        // Precursor A: MACD Top Divergence (MACD頂背離)
+        // Price at or above a recent high, but DIF is lower than at that peak
+        let hasMacdDivergence = false;
+        const macdFull = calculateMACDFull(closePrices);
+        if (macdFull && closePrices.length >= 26) {
+            const lookback = 20;
+            const recentPrices = closePrices.slice(-lookback);
+            const recentDif = macdFull.difArray.slice(-lookback);
+            let prevPeakIdx = -1;
+            let prevPeakPrice = -Infinity;
+            for (let i = 1; i < lookback - 2; i++) {
+                if (recentPrices[i] > recentPrices[i - 1] && recentPrices[i] >= recentPrices[i + 1]) {
+                    if (recentPrices[i] > prevPeakPrice) {
+                        prevPeakPrice = recentPrices[i];
+                        prevPeakIdx = i;
+                    }
+                }
+            }
+            if (prevPeakIdx !== -1) {
+                const currentPrice = recentPrices[lookback - 1];
+                const currentDif = recentDif[lookback - 1];
+                const prevPeakDif = recentDif[prevPeakIdx];
+                hasMacdDivergence = currentPrice >= prevPeakPrice * 0.98 && currentDif < prevPeakDif;
+            }
+        }
+
+        // Precursor B: Volume Decline at High Position (高位量能遞減)
+        let isVolumeDeclineAtHigh = false;
+        if (positionPercent > 60 && volumesInShares.length >= 10) {
+            const last5Vol = volumesInShares.slice(-5);
+            const decliningCount = last5Vol.filter((v, i) => i > 0 && v < last5Vol[i - 1]).length;
+            const vol5Avg = last5Vol.reduce((a, b) => a + b, 0) / 5;
+            const vol10Avg = volumesInShares.slice(-10).reduce((a, b) => a + b, 0) / 10;
+            isVolumeDeclineAtHigh = decliningCount >= 3 && vol5Avg < vol10Avg;
+        }
+
+        // Precursor C: High Position Stagnation (高位橫盤滞漲)
+        let highStagnationDays = 0;
+        if (positionPercent > 60 && prices.length >= 10) {
+            const recentPricesSlice = prices.slice(-10);
+            const maxHighInSlice = Math.max(...recentPricesSlice.map(p => p.max));
+            const lastIndexOfHigh = recentPricesSlice.map(p => p.max).lastIndexOf(maxHighInSlice);
+            highStagnationDays = recentPricesSlice.length - 1 - lastIndexOfHigh;
+        }
+        const isHighStagnant = highStagnationDays >= 5;
+
+        // Composite Distribution Warning Level
+        const distributionPrecursorCount = [hasMacdDivergence, isVolumeDeclineAtHigh, isHighStagnant].filter(Boolean).length;
+        let distributionLevel: 'none' | 'watch' | 'warning' | 'alert' = 'none';
+        if (positionPercent > 60) {
+            if (distributionPrecursorCount >= 2 && (isHighTurnover || isExtremelyHighTurnover) && positionPercent > 70) {
+                distributionLevel = 'alert';
+            } else if (distributionPrecursorCount >= 2) {
+                distributionLevel = 'warning';
+            } else if (distributionPrecursorCount === 1) {
+                distributionLevel = 'watch';
+            }
+        }
+
+        // === Early Accumulation Signals ===
+        // Moderate volume: turnover 1.2x ~ 2x avg (warming up, not yet high)
+        const isModerateVolume = avg20Turnover > 0
+            ? turnoverRate > avg20Turnover * 1.2 && turnoverRate <= avg20Turnover * 2
+            : false;
+        // MACD just turned positive: prev DIF < 0, current DIF >= 0
+        let isMacdJustTurnedPositive = false;
+        if (macdFull && macdFull.difArray.length >= 2) {
+            const prevDif = macdFull.difArray[macdFull.difArray.length - 2];
+            const currDif = macdFull.difArray[macdFull.difArray.length - 1];
+            isMacdJustTurnedPositive = prevDif < 0 && currDif >= 0;
+        }
+
+        // Prices
+        const buyPrice = Number(((latestHigh + latestLow) / 2).toFixed(2));
+        const stopLossPrice = Number((ma20 || latestLow).toFixed(2));
+        const tp1Price = Number((buyPrice * 1.25).toFixed(2));
+        const tp2Price = Number((buyPrice * 1.50).toFixed(2));
+
+        // Logic Status
+        let signalTag: string | null = null;
+        let light = 'red';
+        const rules: string[] = [];
+
+        // Rule: MA20 trend check
+        if (ma20 && latestClose < ma20) {
+            rules.push('股價跌破 20 日均線，趨勢偏弱，請嚴格執行停損或觀望。');
+        } else {
+            rules.push('股價穩站 20 日均線之上，多頭格局維持。');
+        }
+
+        // Rule: MACD momentum
+        if (isMacdPositive) {
+            rules.push('MACD 維持零軸之上，具備上漲動能。');
+        }
+
+        // Rule: Five Signal Detection (Position + Turnover relationship)
+        if (positionPercent < 30) {
+            // Low position zone
+            rules.push(`目前股價處於近 ${period} 日相對低位（<30%）。`);
+            if (isHighTurnover) {
+                light = 'green';
+                signalTag = '低位放量建倉';
+                rules.push('成交量明顯放大（超過近期均量2倍），主力正積極在低檔承接籌碼。建議：可分批買入，第一批買入30%部位，剩餘等量能持續放大後再加碼，以當日最低價為停損參考。');
+            } else if (isShrinkingTurnover && isMacdPositive) {
+                light = 'green';
+                signalTag = '低位縮量蓄勢';
+                rules.push('低位成交量大幅縮小，代表願意賣出的人越來越少，籌碼正在集中。MACD動能指標為正，顯示趨勢轉多。建議：少量試單（10%～20%部位），耐心等待成交量明顯放大再積極加碼。');
+            } else if (isModerateVolume && isMacdPositive) {
+                light = 'green';
+                signalTag = '底部量能回升';
+                rules.push('底部成交量溫和回升（約為近期均量1.2~2倍），已有資金開始試探性進場，MACD動能轉正。建議：少量布局（10%～20%），若後續量能持續放大則逐步加碼至50%部位。');
+            } else if (isMacdJustTurnedPositive && positionPercent < 20) {
+                light = 'green';
+                signalTag = 'MACD低位轉正';
+                rules.push('MACD動能指標剛從負值轉為正值，且股價處於極低位置，是技術面「由跌轉漲」的關鍵轉折訊號。建議：少量試單（10%～15%），以20日均線為停損，確認量能跟上後再加碼。');
+            } else if (isShrinkingTurnover) {
+                light = 'yellow';
+                rules.push('低位成交縮小，市場觀望情緒濃厚。建議：觀望為主，可少量逢低試探，但不宜重倉，等待明確放量訊號。');
+            } else {
+                light = 'yellow';
+                rules.push('低位整理中，量能未有明顯變化。建議：列入觀察清單，等待成交量明顯放大或MACD轉正後再考慮介入。');
+            }
+        } else if (positionPercent > 70) {
+            // High position zone
+            rules.push(`目前股價處於近 ${period} 日相對高位（>70%）。`);
+            if (isExtremelyHighTurnover || (isHighTurnover && hasLongUpperShadow)) {
+                // Signal 2: High position + extreme turnover or long upper shadow = 主力派發出貨
+                light = 'red';
+                if (hasLongUpperShadow) {
+                    rules.push('高位長上影線放量，主力疑似出貨，請提高警覺嚴格停損！');
+                } else {
+                    rules.push('高位爆出天量，主力疑似出貨，請提高警覺嚴格停損！');
+                }
+            } else if (isTrending5DayHighTurnover) {
+                // Signal 5 in high zone: 連續高換手震盪 = 對倒或洗盤
+                light = 'yellow';
+                rules.push('連續換手股價停滯，疑似主力對倒洗籌，觀察突破方向再決策。');
+            } else if (isHighTurnover) {
+                // High turnover at high position, not extreme
+                light = 'yellow';
+                rules.push('高位換手熱烈，請留意追高風險。');
+            } else if (isShrinkingTurnover) {
+                // Signal 4 in high zone: 籌碼鎖定惜售
+                light = 'yellow';
+                rules.push('高位量縮，籌碼相對穩定，建議持股續抱。');
+            } else {
+                light = 'yellow';
+                rules.push('高位量縮，籌碼相對穩定，建議持股續抱。');
+            }
+        } else {
+            // Middle position 30~70
+            rules.push(`目前股價處於近 ${period} 日中階位置。`);
+            if (isTrending5DayHighTurnover && !isHighTurnover) {
+                // Signal 5 in middle zone: 連續換手但今日未特別放量
+                light = 'yellow';
+                rules.push('連續換手股價停滯，疑似主力對倒洗籌，觀察突破方向再決策。');
+            } else if (isHighTurnover) {
+                // Signal 3: Middle position + high turnover = 強勢突破拉升
+                light = 'green';
+                rules.push('帶量突破盤整區，動能轉強。');
+            } else if (isShrinkingTurnover) {
+                // Signal 4 in middle zone: 上漲中繼縮量洗盤
+                light = 'yellow';
+                rules.push('縮量洗盤，籌碼鎖定良好，靜待量增再起。');
+            } else {
+                light = 'yellow';
+                rules.push('價穩量縮，方向待表態。');
+            }
+        }
+
+        // Final strict red override: breaking below MA20 always = red
+        if (ma20 && latestClose < ma20) {
+            light = 'red';
+            signalTag = null; // Reset signal tag when overridden to red
+        }
+
+        // Turnover rate display with dynamic baseline info
+        if (totalShares && totalShares > 0) {
+            if (avg20Turnover > 0) {
+                rules.push(`(真實換手率: ${turnoverRate.toFixed(2)}%，20日均: ${avg20Turnover.toFixed(2)}%，為均值 ${turnoverMultiple.toFixed(1)} 倍)`);
+            } else {
+                rules.push(`(真實換手率: ${turnoverRate.toFixed(2)}%)`);
+            }
+        } else {
+            rules.push(`(因缺少總股本資料，使用5日均量比對換手熱度)`);
+        }
+
+        return NextResponse.json({
+            success: true,
+            data: {
+                stockId,
+                stockName,
+                light,
+                signalTag,
+                prices: {
+                    buy: buyPrice,
+                    stopLoss: stopLossPrice,
+                    tp1: tp1Price,
+                    tp2: tp2Price,
+                },
+                metrics: {
+                    close: latestClose,
+                    ma20: ma20 ? Number(ma20.toFixed(2)) : null,
+                    positionPercent: Number(positionPercent.toFixed(1)),
+                    isHighTurnover,
+                    turnoverRate: turnoverRate > 0 ? Number(turnoverRate.toFixed(2)) : null,
+                    avg20Turnover: avg20Turnover > 0 ? Number(avg20Turnover.toFixed(2)) : null,
+                    turnoverMultiple: turnoverMultiple > 0 ? Number(turnoverMultiple.toFixed(1)) : null,
+                    isStopLossFallback: !ma20
+                },
+                distribution: {
+                    level: distributionLevel,
+                    hasMacdDivergence,
+                    isVolumeDeclineAtHigh,
+                    isHighStagnant,
+                    highStagnationDays,
+                    precursorCount: distributionPrecursorCount,
+                },
+                interpretations: rules,
+            }
+        });
+    } catch (error: any) {
+        console.error('[SmartNavigator] Error:', error);
+        return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    }
+}

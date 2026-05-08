@@ -411,11 +411,10 @@ export default function SmartNavigatorPage() {
     const [selectedDate, setSelectedDate] = useState<string | null>(null);
     const [isFiltering, setIsFiltering] = useState(false);
     const [filterProgress, setFilterProgress] = useState({ current: 0, total: 0, phase: '' });
-    const [filterResults, setFilterResults] = useState<Array<{stockId: string, stockName: string, data: any, distributionLevel?: string | null}>>([]);
+    const [filterResults, setFilterResults] = useState<Array<{stockId: string, stockName: string, data: any}>>([]);
     const [filterCompleted, setFilterCompleted] = useState(false);
     const [filterMode, setFilterMode] = useState<'green' | 'distribution'>('green');
     const [lightFilter, setLightFilter] = useState<'all' | 'green' | 'yellow' | 'red'>('all');
-    const [distributionFilter, setDistributionFilter] = useState<'all' | 'alert' | 'warning' | 'watch'>('all');
 
     // Print State
     const [isPrinting, setIsPrinting] = useState(false);
@@ -813,47 +812,10 @@ export default function SmartNavigatorPage() {
                             </div>
                         )}
 
-                        {/* 出貨預警模式：等級過濾器 */}
-                        {filterMode === 'distribution' && filterResults.length > 0 && (
-                            <div className="mb-6 flex items-center gap-3 flex-wrap">
-                                <span className="text-xs font-black text-slate-400 tracking-widest uppercase">依警示等級篩選：</span>
-                                {([
-                                    { key: 'all', label: '全部', activeCls: 'bg-slate-700 border-slate-500 text-white', inactiveCls: 'bg-black/40 border-slate-700 text-slate-400' },
-                                    { key: 'alert', label: '🔴 出貨進行中', activeCls: 'bg-rose-500/20 border-rose-500 text-rose-400 shadow-[0_0_12px_rgba(244,63,94,0.3)]', inactiveCls: 'bg-black/40 border-slate-700 text-slate-400 hover:bg-rose-500/10 hover:border-rose-500/40 hover:text-rose-400' },
-                                    { key: 'warning', label: '🟠 出貨準備前兆', activeCls: 'bg-orange-500/20 border-orange-500 text-orange-400 shadow-[0_0_12px_rgba(249,115,22,0.3)]', inactiveCls: 'bg-black/40 border-slate-700 text-slate-400 hover:bg-orange-500/10 hover:border-orange-500/40 hover:text-orange-400' },
-                                    { key: 'watch', label: '🟡 留意觀察', activeCls: 'bg-amber-500/20 border-amber-500 text-amber-400 shadow-[0_0_12px_rgba(245,158,11,0.3)]', inactiveCls: 'bg-black/40 border-slate-700 text-slate-400 hover:bg-amber-500/10 hover:border-amber-500/40 hover:text-amber-400' },
-                                ] as { key: 'all'|'alert'|'warning'|'watch', label: string, activeCls: string, inactiveCls: string }[]).map(({ key, label, activeCls, inactiveCls }) => {
-                                    const count = key === 'all'
-                                        ? filterResults.length
-                                        : filterResults.filter(r => r.distributionLevel === key).length;
-                                    return (
-                                        <button
-                                            key={key}
-                                            onClick={() => setDistributionFilter(key)}
-                                            className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-black border transition-all ${
-                                                distributionFilter === key ? activeCls : inactiveCls
-                                            }`}
-                                        >
-                                            <span>{label}</span>
-                                            <span className={`ml-1 text-xs px-1.5 py-0.5 rounded-md ${
-                                                distributionFilter === key ? 'bg-white/10' : 'bg-slate-800'
-                                            }`}>{count}</span>
-                                        </button>
-                                    );
-                                })}
-                            </div>
-                        )}
-
                         {filterResults.length > 0 ? (
                             <div className="space-y-4">
                                 {filterResults
-                                    .filter((res: any) => {
-                                        if (filterMode === 'green') {
-                                            return lightFilter === 'all' || res.data.light === lightFilter;
-                                        } else {
-                                            return distributionFilter === 'all' || res.distributionLevel === distributionFilter;
-                                        }
-                                    })
+                                    .filter((res: any) => filterMode !== 'green' || lightFilter === 'all' || res.data.light === lightFilter)
                                     .map((res: any, idx: number) => {
                                     const lvl = res.distributionLevel;
                                     const badge = lvl === 'alert'
@@ -897,16 +859,6 @@ export default function SmartNavigatorPage() {
                                         </div>
                                         <h3 className="text-xl font-black text-slate-300 mb-2">此燈號無符合股票</h3>
                                         <p className="text-slate-500 text-sm">選擇「全部」或其他燈號查看結果。</p>
-                                    </div>
-                                )}
-                                {filterMode === 'distribution' && distributionFilter !== 'all' &&
-                                    filterResults.filter((r: any) => r.distributionLevel === distributionFilter).length === 0 && (
-                                    <div className="bg-slate-900 border border-slate-800 rounded-3xl p-10 text-center">
-                                        <div className="text-4xl mb-4">
-                                            {distributionFilter === 'alert' ? '🔴' : distributionFilter === 'warning' ? '🟠' : '🟡'}
-                                        </div>
-                                        <h3 className="text-xl font-black text-slate-300 mb-2">此等級無符合股票</h3>
-                                        <p className="text-slate-500 text-sm">選擇「全部」或其他警示等級查看結果。</p>
                                     </div>
                                 )}
                             </div>
