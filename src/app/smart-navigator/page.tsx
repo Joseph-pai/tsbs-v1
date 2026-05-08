@@ -414,6 +414,7 @@ export default function SmartNavigatorPage() {
     const [filterResults, setFilterResults] = useState<Array<{stockId: string, stockName: string, data: any}>>([]);
     const [filterCompleted, setFilterCompleted] = useState(false);
     const [filterMode, setFilterMode] = useState<'green' | 'distribution'>('green');
+    const [lightFilter, setLightFilter] = useState<'all' | 'green' | 'yellow' | 'red'>('all');
 
     // Print State
     const [isPrinting, setIsPrinting] = useState(false);
@@ -678,7 +679,7 @@ export default function SmartNavigatorPage() {
                                 <div className="space-y-4">
                                     {/* Mode Toggle */}
                                     <div>
-                                        <div className="text-sm text-slate-400 mb-2 font-medium">1. 篹選模式</div>
+                                        <div className="text-sm text-slate-400 mb-2 font-medium">1. 篩選模式</div>
                                         <div className="flex gap-2">
                                             <button
                                                 onClick={() => setFilterMode('green')}
@@ -768,7 +769,7 @@ export default function SmartNavigatorPage() {
                 {/* Result Area (Auto Filter) */}
                 {showAutoFilter && filterCompleted && (
                     <div className="animate-in fade-in slide-in-from-bottom-8 duration-700">
-                        <div className="flex items-center gap-3 mb-8">
+                        <div className="flex items-center gap-3 mb-6">
                             <div className="h-[1px] flex-1 bg-slate-800"></div>
                             <div className={`font-black tracking-widest text-lg ${filterMode === 'distribution' ? 'text-rose-400' : 'text-indigo-400'}`}>
                                 {filterMode === 'distribution'
@@ -779,9 +780,43 @@ export default function SmartNavigatorPage() {
                             <div className="h-[1px] flex-1 bg-slate-800"></div>
                         </div>
 
+                        {/* 主力進場模式：燈號顏色過濾器 */}
+                        {filterMode === 'green' && filterResults.length > 0 && (
+                            <div className="mb-6 flex items-center gap-3 flex-wrap">
+                                <span className="text-xs font-black text-slate-400 tracking-widest uppercase">依燈號篩選：</span>
+                                {([
+                                    { key: 'all', label: '全部', emoji: '⚪', activeCls: 'bg-slate-700 border-slate-500 text-white', inactiveCls: 'bg-black/40 border-slate-700 text-slate-400' },
+                                    { key: 'green', label: '綠燈', emoji: '🟢', activeCls: 'bg-emerald-500/20 border-emerald-500 text-emerald-400 shadow-[0_0_12px_rgba(16,185,129,0.3)]', inactiveCls: 'bg-black/40 border-slate-700 text-slate-400 hover:bg-emerald-500/10 hover:border-emerald-500/40 hover:text-emerald-400' },
+                                    { key: 'yellow', label: '黃燈', emoji: '🟡', activeCls: 'bg-amber-500/20 border-amber-500 text-amber-400 shadow-[0_0_12px_rgba(245,158,11,0.3)]', inactiveCls: 'bg-black/40 border-slate-700 text-slate-400 hover:bg-amber-500/10 hover:border-amber-500/40 hover:text-amber-400' },
+                                    { key: 'red', label: '紅燈', emoji: '🔴', activeCls: 'bg-rose-500/20 border-rose-500 text-rose-400 shadow-[0_0_12px_rgba(244,63,94,0.3)]', inactiveCls: 'bg-black/40 border-slate-700 text-slate-400 hover:bg-rose-500/10 hover:border-rose-500/40 hover:text-rose-400' },
+                                ] as { key: 'all'|'green'|'yellow'|'red', label: string, emoji: string, activeCls: string, inactiveCls: string }[]).map(({ key, label, emoji, activeCls, inactiveCls }) => {
+                                    const count = key === 'all'
+                                        ? filterResults.length
+                                        : filterResults.filter(r => r.data.light === key).length;
+                                    return (
+                                        <button
+                                            key={key}
+                                            onClick={() => setLightFilter(key)}
+                                            className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-black border transition-all ${
+                                                lightFilter === key ? activeCls : inactiveCls
+                                            }`}
+                                        >
+                                            <span>{emoji}</span>
+                                            <span>{label}</span>
+                                            <span className={`ml-1 text-xs px-1.5 py-0.5 rounded-md ${
+                                                lightFilter === key ? 'bg-white/10' : 'bg-slate-800'
+                                            }`}>{count}</span>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        )}
+
                         {filterResults.length > 0 ? (
                             <div className="space-y-4">
-                                {filterResults.map((res: any, idx: number) => {
+                                {filterResults
+                                    .filter((res: any) => filterMode !== 'green' || lightFilter === 'all' || res.data.light === lightFilter)
+                                    .map((res: any, idx: number) => {
                                     const lvl = res.distributionLevel;
                                     const badge = lvl === 'alert'
                                         ? { text: '🔴 出貨進行中', cls: 'text-rose-400 border-rose-500/40 bg-rose-500/10' }
@@ -815,6 +850,17 @@ export default function SmartNavigatorPage() {
                                         </div>
                                     );
                                 })}
+                                {/* 過濾後無結果提示 */}
+                                {filterMode === 'green' && lightFilter !== 'all' &&
+                                    filterResults.filter((r: any) => r.data.light === lightFilter).length === 0 && (
+                                    <div className="bg-slate-900 border border-slate-800 rounded-3xl p-10 text-center">
+                                        <div className="text-4xl mb-4">
+                                            {lightFilter === 'green' ? '🟢' : lightFilter === 'yellow' ? '🟡' : '🔴'}
+                                        </div>
+                                        <h3 className="text-xl font-black text-slate-300 mb-2">此燈號無符合股票</h3>
+                                        <p className="text-slate-500 text-sm">選擇「全部」或其他燈號查看結果。</p>
+                                    </div>
+                                )}
                             </div>
                         ) : (
                             <div className="bg-slate-900 border border-slate-800 rounded-3xl p-12 text-center shadow-2xl">
