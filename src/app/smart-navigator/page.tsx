@@ -543,15 +543,8 @@ export default function SmartNavigatorPage() {
                         const res = await fetch(`/api/smart-navigator?stockId=${stock.id}&period=${autoPeriod}`);
                         const json = await res.json();
                         if (json.success && json.data) {
-                            if (filterMode === 'green') {
-                                // 主力進場：顯示所有有 signalTag 的股票（綠/黃/紅均含）
-                                if (json.data.signalTag !== null && json.data.signalTag !== undefined) {
-                                    return { stockId: stock.id, stockName: stock.name, data: json.data, distributionLevel: null };
-                                }
-                            } else {
-                                if (json.data.distribution && json.data.distribution.level !== 'none') {
-                                    return { stockId: stock.id, stockName: stock.name, data: json.data, distributionLevel: json.data.distribution.level };
-                                }
+                            if (json.data.signalTag !== null && json.data.signalTag !== undefined) {
+                                return { stockId: stock.id, stockName: stock.name, data: json.data, distributionLevel: json.data.distribution?.level };
                             }
                         }
                     } catch (e) {
@@ -564,13 +557,8 @@ export default function SmartNavigatorPage() {
                 validResults.push(...resolved.filter(r => r !== null));
             }
 
-            if (filterMode === 'distribution') {
-                validResults.sort((a, b) => (levelOrder[a.distributionLevel] ?? 3) - (levelOrder[b.distributionLevel] ?? 3));
-            }
-            if (filterMode === 'green') {
-                const lightOrder: Record<string, number> = { green: 0, yellow: 1, red: 2 };
-                validResults.sort((a, b) => (lightOrder[a.data.light] ?? 1) - (lightOrder[b.data.light] ?? 1));
-            }
+            const lightOrder: Record<string, number> = { green: 0, yellow: 1, red: 2 };
+            validResults.sort((a, b) => (lightOrder[a.data.light] ?? 1) - (lightOrder[b.data.light] ?? 1));
 
             setFilterProgress({ current: uniqueStocks.length, total: uniqueStocks.length, phase: '分析完成' });
             setFilterResults(validResults as any);
@@ -680,24 +668,9 @@ export default function SmartNavigatorPage() {
                                 <div className="space-y-4">
                                     {/* Mode Toggle */}
                                     <div>
-                                        <div className="text-sm text-slate-400 mb-2 font-medium">1. 篩選模式</div>
-                                        <div className="flex gap-2">
-                                            <button
-                                                onClick={() => setFilterMode('green')}
-                                                className={`flex-1 py-2.5 rounded-xl text-sm font-black border transition-all ${filterMode === 'green' ? 'bg-indigo-500/20 border-indigo-500 text-indigo-400' : 'bg-black/40 border-slate-700 text-slate-400 hover:bg-slate-800'}`}
-                                            >
-                                                🎯 主力進場
-                                            </button>
-                                            <button
-                                                onClick={() => setFilterMode('distribution')}
-                                                className={`flex-1 py-2.5 rounded-xl text-sm font-black border transition-all ${filterMode === 'distribution' ? 'bg-rose-500/20 border-rose-500 text-rose-400' : 'bg-black/40 border-slate-700 text-slate-400 hover:bg-slate-800'}`}
-                                            >
-                                                ⚠️ 出貨預警
-                                            </button>
-                                        </div>
                                     </div>
                                     <div>
-                                        <div className="text-sm text-slate-400 mb-2 font-medium">2. 數據日期區間</div>
+                                        <div className="text-sm text-slate-400 mb-2 font-medium">1. 數據日期區間</div>
                                         <div className="grid grid-cols-4 gap-2">
                                             {['30', '60', '90', '120'].map(p => (
                                                 <button
@@ -710,11 +683,9 @@ export default function SmartNavigatorPage() {
                                             ))}
                                         </div>
                                     </div>
-                                    {filterMode === 'green' && (
-                                        <div className="bg-indigo-500/5 border border-indigo-500/20 rounded-xl p-3 text-xs text-indigo-300/70">
-                                            📌 篩選出所有帶有主力動向訊號的股票，依 🟢 綠燈 → 🟡 黃燈 → 🔴 紅燈排序。跌破20日均線的股票不顯示。
-                                        </div>
-                                    )}
+                                    <div className="bg-indigo-500/5 border border-indigo-500/20 rounded-xl p-3 text-xs text-indigo-300/70">
+                                        📌 篩選出所有帶有主力動向訊號的股票，依 🟢 綠燈 → 🟡 黃燈 → 🔴 紅燈排序。跌破20日均線的股票不顯示。
+                                    </div>
                                     
                                     <button
                                         onClick={handleAutoFilter}
@@ -772,17 +743,14 @@ export default function SmartNavigatorPage() {
                     <div className="animate-in fade-in slide-in-from-bottom-8 duration-700">
                         <div className="flex items-center gap-3 mb-6">
                             <div className="h-[1px] flex-1 bg-slate-800"></div>
-                            <div className={`font-black tracking-widest text-lg ${filterMode === 'distribution' ? 'text-rose-400' : 'text-indigo-400'}`}>
-                                {filterMode === 'distribution'
-                                    ? `出貨預警結果 (${filterResults.length} 檔)`
-                                    : `主力動向篩選結果 (${filterResults.length} 檔)`
-                                }
+                            <div className={`font-black tracking-widest text-lg text-indigo-400`}>
+                                主力動向篩選結果 ({filterResults.length} 檔)
                             </div>
                             <div className="h-[1px] flex-1 bg-slate-800"></div>
                         </div>
 
-                        {/* 主力進場模式：燈號顏色過濾器 */}
-                        {filterMode === 'green' && filterResults.length > 0 && (
+                        {/* 燈號顏色過濾器 */}
+                        {filterResults.length > 0 && (
                             <div className="mb-6 flex items-center gap-3 flex-wrap">
                                 <span className="text-xs font-black text-slate-400 tracking-widest uppercase">依燈號篩選：</span>
                                 {([
@@ -813,47 +781,10 @@ export default function SmartNavigatorPage() {
                             </div>
                         )}
 
-                        {/* 出貨預警模式：等級過濾器 */}
-                        {filterMode === 'distribution' && filterResults.length > 0 && (
-                            <div className="mb-6 flex items-center gap-3 flex-wrap">
-                                <span className="text-xs font-black text-slate-400 tracking-widest uppercase">依警示等級篩選：</span>
-                                {([
-                                    { key: 'all', label: '全部', activeCls: 'bg-slate-700 border-slate-500 text-white', inactiveCls: 'bg-black/40 border-slate-700 text-slate-400' },
-                                    { key: 'alert', label: '🔴 出貨進行中', activeCls: 'bg-rose-500/20 border-rose-500 text-rose-400 shadow-[0_0_12px_rgba(244,63,94,0.3)]', inactiveCls: 'bg-black/40 border-slate-700 text-slate-400 hover:bg-rose-500/10 hover:border-rose-500/40 hover:text-rose-400' },
-                                    { key: 'warning', label: '🟠 出貨準備前兆', activeCls: 'bg-orange-500/20 border-orange-500 text-orange-400 shadow-[0_0_12px_rgba(249,115,22,0.3)]', inactiveCls: 'bg-black/40 border-slate-700 text-slate-400 hover:bg-orange-500/10 hover:border-orange-500/40 hover:text-orange-400' },
-                                    { key: 'watch', label: '🟡 留意觀察', activeCls: 'bg-amber-500/20 border-amber-500 text-amber-400 shadow-[0_0_12px_rgba(245,158,11,0.3)]', inactiveCls: 'bg-black/40 border-slate-700 text-slate-400 hover:bg-amber-500/10 hover:border-amber-500/40 hover:text-amber-400' },
-                                ] as { key: 'all'|'alert'|'warning'|'watch', label: string, activeCls: string, inactiveCls: string }[]).map(({ key, label, activeCls, inactiveCls }) => {
-                                    const count = key === 'all'
-                                        ? filterResults.length
-                                        : filterResults.filter(r => r.distributionLevel === key).length;
-                                    return (
-                                        <button
-                                            key={key}
-                                            onClick={() => setDistributionFilter(key)}
-                                            className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-black border transition-all ${
-                                                distributionFilter === key ? activeCls : inactiveCls
-                                            }`}
-                                        >
-                                            <span>{label}</span>
-                                            <span className={`ml-1 text-xs px-1.5 py-0.5 rounded-md ${
-                                                distributionFilter === key ? 'bg-white/10' : 'bg-slate-800'
-                                            }`}>{count}</span>
-                                        </button>
-                                    );
-                                })}
-                            </div>
-                        )}
-
                         {filterResults.length > 0 ? (
                             <div className="space-y-4">
                                 {filterResults
-                                    .filter((res: any) => {
-                                        if (filterMode === 'green') {
-                                            return lightFilter === 'all' || res.data.light === lightFilter;
-                                        } else {
-                                            return distributionFilter === 'all' || res.distributionLevel === distributionFilter;
-                                        }
-                                    })
+                                    .filter((res: any) => lightFilter === 'all' || res.data.light === lightFilter)
                                     .map((res: any, idx: number) => {
                                     const lvl = res.distributionLevel;
                                     const badge = lvl === 'alert'

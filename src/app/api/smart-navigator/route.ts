@@ -242,29 +242,39 @@ export async function GET(request: Request) {
                 signalTag = '低位整理等待';
                 rules.push('低位整理中，量能未有明顯變化，市場觀望情緒濃厚。目前尚無明確的主力介入跡象，但低位本身風險報酬比佳。建議：列入觀察清單，耐心等待成交量明顯放大（超過近期均量2倍）或MACD指標轉正後，再考慮介入。');
             }
-        } else if (positionPercent > 70) {
-            // High position zone — 炒作尾聲警戒區
-            rules.push(`目前股價處於近 ${period} 日相對高位（>70%）。`);
-            if (isExtremelyHighTurnover || (isHighTurnover && hasLongUpperShadow)) {
-                // Signal 2: 炒作尾聲 — 主力大量出貨
+        } else if (positionPercent > 60) {
+            // High position zone — 炒作尾聲警戒區 (放寬至 60% 監控緩跌出貨)
+            rules.push(`目前股價處於近 ${period} 日相對高位（>${Math.round(positionPercent)}%）。`);
+            
+            if (positionPercent > 70 && (isExtremelyHighTurnover || (isHighTurnover && hasLongUpperShadow))) {
+                // Signal 2: 炒作尾聲 — 主力暴力出貨 (最高優先級)
                 light = 'red';
-                signalTag = '主力高位出貨';
+                signalTag = hasLongUpperShadow ? '主力逢高倒貨 (避雷針)' : '主力高位暴力出貨';
                 if (hasLongUpperShadow) {
                     rules.push('⚠️ 高位出現長上影線並伴隨放量。這是主力趁市場熱情高漲大量賣出的典型訊號（俗稱「射擊之星」）。上影線越長，代表當日賣壓越強，大量散戶正在接盤。建議：無論獲利多少，必須立即減碼50%以上，切勿等待反彈。剩餘持股設嚴格停損，高位反彈即為出場機會。');
                 } else {
                     rules.push('⚠️ 高位爆出超大量（超過近期均量4倍以上）。這通常是主力藉助利多消息或市場狂熱，在最高點附近大量傾倒籌碼的訊號。散戶正在成為主力的接盤方。建議：見此訊號必須立即停損離場，寧可少賺，絕不在主力出貨時繼續持有。');
                 }
-            } else if (isTrending5DayHighTurnover) {
+            } else if (distributionPrecursorCount >= 2) {
+                // 次高優先級：動能衰竭/緩慢派發
+                light = 'red';
+                signalTag = '高位動能衰竭 (盤跌預警)';
+                rules.push('⚠️ [趨勢風險] 股價出現多重衰退前兆 (如MACD頂背離、量能萎縮或高位滯漲)。主力可能正在利用盤整掩護，進行「溫水煮青蛙」式的緩慢派發。建議：提高警覺，跌破 20 日均線或跌破近期盤整區間底線時，必須立即停損/停利出場。');
+            } else if (isTrending5DayHighTurnover && positionPercent > 70) {
                 // Signal 5 in high zone: 對倒震盪 — 方向不明
                 light = 'yellow';
                 signalTag = '高位對倒震盪';
                 rules.push('連續5日以上保持高換手，但股價在小範圍劇烈震盪而未有效突破。這可能是主力「左手換右手」製造熱鬧假象，或是在洗清短線浮額。在高位出現此訊號風險較大，方向尚未明朗。建議：採觀望策略，不要追入熱鬧假象。若後續放量向上突破壓力，可少量跟進；若向下跌破支撐，立即離場。');
-            } else if (isHighTurnover) {
+            } else if (distributionPrecursorCount === 1) {
+                light = 'yellow';
+                signalTag = '高位初現疲態';
+                rules.push('高位出現單一衰退前兆 (如量能不濟或指標背離)。目前尚未全面轉弱，但上漲動能已受阻。建議：持股者縮緊移動停利空間，不宜再加碼。');
+            } else if (isHighTurnover && positionPercent > 70) {
                 // High turnover at high position, not extreme
                 light = 'yellow';
                 signalTag = '高位追漲風險';
                 rules.push('高位出現明顯放量（超過均量2倍），代表有人在積極賣出，同時也有人積極買入，多空激烈廝殺。在高位出現此現象往往是短期頂點特徵。建議：持股者設定嚴格停利點（距成本+20%以上），絕對不追高加碼。若收盤出現長上影線，視為明確賣出訊號。');
-            } else if (isShrinkingTurnover) {
+            } else if (isShrinkingTurnover && positionPercent > 70) {
                 // Signal 4 in high zone: 籌碼鎖定惜售
                 light = 'yellow';
                 signalTag = '高位量縮惜售';
@@ -272,11 +282,11 @@ export async function GET(request: Request) {
             } else {
                 light = 'yellow';
                 signalTag = '高位整理觀察';
-                rules.push('股價在相對高位橫盤整理，量能平穩無特殊異常。目前尚無明確出貨跡象，但高位本身追漲風險較高。建議：未持股者不建議追高進場，風險報酬比不佳。持股者繼續持有但需提高警戒，密切觀察「出貨預警」卡片是否出現黃橙紅訊號，設好移動停利保護獲利。');
+                rules.push('股價在相對高位橫盤整理，量能平穩無特殊異常。目前尚無明確出貨跡象，但高位本身追漲風險較高。建議：未持股者不建議追高進場，風險報酬比不佳。持股者繼續持有但需提高警戒，密切觀察是否出現紅黃燈衰退訊號，設好移動停利保護獲利。');
             }
         } else {
-            // Middle position 30~70 — 炒作進行中觀察區
-            rules.push(`目前股價處於近 ${period} 日中階位置（30%~70%）。`);
+            // Middle position 30~60 — 炒作進行中觀察區
+            rules.push(`目前股價處於近 ${period} 日中階位置（30%~60%）。`);
             if (isTrending5DayHighTurnover && !isHighTurnover) {
                 // Signal 5 in middle zone: 連續換手但今日未特別放量
                 light = 'yellow';
