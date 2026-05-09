@@ -424,7 +424,7 @@ export default function SmartNavigatorPage() {
     const [filterResults, setFilterResults] = useState<Array<{stockId: string, stockName: string, data: any, distributionLevel?: string | null}>>([]);
     const [filterCompleted, setFilterCompleted] = useState(false);
     const [filterMode, setFilterMode] = useState<'green' | 'distribution'>('green');
-    const [lightFilter, setLightFilter] = useState<'all' | 'green' | 'yellow' | 'red'>('all');
+    const [lightFilter, setLightFilter] = useState<'all' | 'green' | 'yellow'>('all');
     const [distributionFilter, setDistributionFilter] = useState<'all' | 'alert' | 'warning' | 'watch' | 'safe'>('all');
 
     // Print State
@@ -554,8 +554,8 @@ export default function SmartNavigatorPage() {
                         const json = await res.json();
                         if (json.success && json.data) {
                             if (filterMode === 'green') {
-                                // 主力進場：顯示所有有 signalTag 的股票（綠/黃/紅均含，紅燈附加警示標記）
-                                if (json.data.signalTag !== null && json.data.signalTag !== undefined) {
+                                // 主力進場：只收錄綠燈和黃燈（低/中位主力積筌），紅燈(高位/跌破均線)不是主力準備進場的訊號，一律排除
+                                if ((json.data.light === 'green' || json.data.light === 'yellow') && json.data.signalTag !== null) {
                                     return { stockId: stock.id, stockName: stock.name, data: json.data, distributionLevel: json.data.distribution?.level };
                                 }
                             } else {
@@ -722,8 +722,8 @@ export default function SmartNavigatorPage() {
                                         </div>
                                     </div>
                                     {filterMode === 'green' && (
-                                        <div className="bg-indigo-500/5 border border-indigo-500/20 rounded-xl p-3 text-xs text-indigo-300/70">
-                                            📌 篩選出所有帶有主力動向訊號的股票，依 🟢 綠燈 → 🟡 黃燈 → 🔴 紅燈排序。跌破20日均線的股票不顯示。
+                                        <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-xl p-3 text-xs text-emerald-300/70">
+                                            🎯 只顯示🟢 綠燈（主力積極建倉中）和🟡 黃燈（主力初步佈局）的股票。紅燈（高位/跌破均線）不是主力準備進場的訊號，不納入築選。
                                         </div>
                                     )}
                                     
@@ -798,10 +798,9 @@ export default function SmartNavigatorPage() {
                                 <span className="text-xs font-black text-slate-400 tracking-widest uppercase">依燈號篩選：</span>
                                 {([
                                     { key: 'all', label: '全部', emoji: '⚪', activeCls: 'bg-slate-700 border-slate-500 text-white', inactiveCls: 'bg-black/40 border-slate-700 text-slate-400' },
-                                    { key: 'green', label: '綠燈', emoji: '🟢', activeCls: 'bg-emerald-500/20 border-emerald-500 text-emerald-400 shadow-[0_0_12px_rgba(16,185,129,0.3)]', inactiveCls: 'bg-black/40 border-slate-700 text-slate-400 hover:bg-emerald-500/10 hover:border-emerald-500/40 hover:text-emerald-400' },
-                                    { key: 'yellow', label: '黃燈', emoji: '🟡', activeCls: 'bg-amber-500/20 border-amber-500 text-amber-400 shadow-[0_0_12px_rgba(245,158,11,0.3)]', inactiveCls: 'bg-black/40 border-slate-700 text-slate-400 hover:bg-amber-500/10 hover:border-amber-500/40 hover:text-amber-400' },
-                                    { key: 'red', label: '紅燈', emoji: '🔴', activeCls: 'bg-rose-500/20 border-rose-500 text-rose-400 shadow-[0_0_12px_rgba(244,63,94,0.3)]', inactiveCls: 'bg-black/40 border-slate-700 text-slate-400 hover:bg-rose-500/10 hover:border-rose-500/40 hover:text-rose-400' },
-                                ] as { key: 'all'|'green'|'yellow'|'red', label: string, emoji: string, activeCls: string, inactiveCls: string }[]).map(({ key, label, emoji, activeCls, inactiveCls }) => {
+                                    { key: 'green', label: '綠燈 (主力建倉)', emoji: '🟢', activeCls: 'bg-emerald-500/20 border-emerald-500 text-emerald-400 shadow-[0_0_12px_rgba(16,185,129,0.3)]', inactiveCls: 'bg-black/40 border-slate-700 text-slate-400 hover:bg-emerald-500/10 hover:border-emerald-500/40 hover:text-emerald-400' },
+                                    { key: 'yellow', label: '黃燈 (初步佈局)', emoji: '🟡', activeCls: 'bg-amber-500/20 border-amber-500 text-amber-400 shadow-[0_0_12px_rgba(245,158,11,0.3)]', inactiveCls: 'bg-black/40 border-slate-700 text-slate-400 hover:bg-amber-500/10 hover:border-amber-500/40 hover:text-amber-400' },
+                                ] as { key: 'all'|'green'|'yellow', label: string, emoji: string, activeCls: string, inactiveCls: string }[]).map(({ key, label, emoji, activeCls, inactiveCls }) => {
                                     const count = key === 'all'
                                         ? filterResults.length
                                         : filterResults.filter(r => r.data.light === key).length;
