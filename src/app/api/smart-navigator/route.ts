@@ -154,12 +154,25 @@ export async function GET(request: Request) {
 
         // Precursor B: Volume Decline at High Position (高位量能遞減)
         let isVolumeDeclineAtHigh = false;
-        if (positionPercent > 60 && volumesInShares.length >= 10) {
+        let isPriceDroppingWithVolumeDecline = false; // 【強化2】
+        if (positionPercent > 60 && volumesInShares.length >= 10 && closePrices.length >= 5) {
             const last5Vol = volumesInShares.slice(-5);
             const decliningCount = last5Vol.filter((v, i) => i > 0 && v < last5Vol[i - 1]).length;
             const vol5Avg = last5Vol.reduce((a, b) => a + b, 0) / 5;
             const vol10Avg = volumesInShares.slice(-10).reduce((a, b) => a + b, 0) / 10;
-            isVolumeDeclineAtHigh = decliningCount >= 3 && vol5Avg < vol10Avg;
+            
+            // 【強化2】股價方向區分
+            const last5Close = closePrices.slice(-5);
+            const priceDropPercent = ((last5Close[0] - last5Close[4]) / last5Close[0]) * 100;
+            
+            if (decliningCount >= 3 && vol5Avg < vol10Avg) {
+                if (priceDropPercent > 3) {
+                    isVolumeDeclineAtHigh = true;
+                    isPriceDroppingWithVolumeDecline = true; // 量縮且價跌，緩慢出貨
+                } else {
+                    isVolumeDeclineAtHigh = false; // 量縮但價穩，鎖倉，不視為出貨前兆
+                }
+            }
         }
 
         // Precursor C: High Position Stagnation (高位橫盤滞漲)
@@ -173,7 +186,9 @@ export async function GET(request: Request) {
         const isHighStagnant = highStagnationDays >= 5;
 
         // Composite Distribution Warning Level
-        const distributionPrecursorCount = [hasMacdDivergence, isVolumeDeclineAtHigh, isHighStagnant].filter(Boolean).length;
+        const basePrecursorCount = [hasMacdDivergence, isVolumeDeclineAtHigh, isHighStagnant].filter(Boolean).length;
+        // 【強化2】若量縮且價跌，前兆數額外 +1
+        const distributionPrecursorCount = basePrecursorCount + (isPriceDroppingWithVolumeDecline ? 1 : 0);
         
         // 新增暴力出貨布林值
         const isViolentDistribution = positionPercent > 70 && (isExtremelyHighTurnover || (isHighTurnover && hasLongUpperShadow));
@@ -301,7 +316,7 @@ export async function GET(request: Request) {
                 // Signal 4 in high zone: 籌碼鎖定惜售
                 light = 'red';
                 signalTag = '高位量縮惜售⛔';
-                rules.push('⛔ 【高位勿追入】高位量能萎縮，籌碼鎖定，賣壓較輕，股價可能維持高位。但對未持股者而言，高位追入風險報酬比不佳。建議：未持股者不建議追高進場。持股者可繼續持有，設好移動停利保護獲利。');
+                rules.push('⛔ 【高位勿追入】高位量能萎縮，但股價未明顯下跌，籌碼鎖定，賣壓較輕。對未持股者而言，高位追入風險報酬比不佳。建議：未持股者不建議追高進場。持股者可繼續持有，設好移動停利保護獲利。若後續伴隨股價緩跌（大於3%），則為主力的「緩慢出貨」訊號。');
             } else {
                 light = 'red';
                 signalTag = '高位整理觀察⛔';
