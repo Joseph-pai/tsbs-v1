@@ -170,7 +170,7 @@ export async function GET(request: Request) {
         // 新增暴力出貨布林值
         const isViolentDistribution = positionPercent > 70 && (isExtremelyHighTurnover || (isHighTurnover && hasLongUpperShadow));
         
-        let distributionLevel: 'none' | 'watch' | 'warning' | 'alert' = 'none';
+        let distributionLevel: 'safe' | 'watch' | 'warning' | 'alert' = 'safe';
         if (positionPercent > 60) {
             if (isViolentDistribution || (distributionPrecursorCount >= 2 && (isHighTurnover || isExtremelyHighTurnover) && positionPercent > 70)) {
                 distributionLevel = 'alert'; // 暴力出貨或放量衰退都屬於最高級別
@@ -178,8 +178,11 @@ export async function GET(request: Request) {
                 distributionLevel = 'warning';
             } else if (distributionPrecursorCount === 1) {
                 distributionLevel = 'watch';
+            } else {
+                distributionLevel = 'safe'; // 高位但目前無出貨跡象
             }
         }
+        // 低/中位（<=60%）：主力不在出貨區，一律標記為 safe
 
         // === Early Accumulation Signals ===
         // Moderate volume: turnover 1.2x ~ 2x avg (warming up, not yet high)
@@ -266,27 +269,27 @@ export async function GET(request: Request) {
                 rules.push('⚠️ [趨勢風險] 股價出現多重衰退前兆 (如MACD頂背離、量能萎縮或高位滯漲)。主力可能正在利用盤整掩護，進行「溫水煮青蛙」式的緩慢派發。建議：提高警覺，跌破 20 日均線或跌破近期盤整區間底線時，必須立即停損/停利出場。');
             } else if (isTrending5DayHighTurnover && positionPercent > 70) {
                 // Signal 5 in high zone: 對倒震盪 — 方向不明
-                light = 'yellow';
-                signalTag = '高位對倒震盪';
-                rules.push('連續5日以上保持高換手，但股價在小範圍劇烈震盪而未有效突破。這可能是主力「左手換右手」製造熱鬧假象，或是在洗清短線浮額。在高位出現此訊號風險較大，方向尚未明朗。建議：採觀望策略，不要追入熱鬧假象。若後續放量向上突破壓力，可少量跟進；若向下跌破支撐，立即離場。');
+                light = 'red';
+                signalTag = '高位對倒震盪⛔';
+                rules.push('⛔ 【高位勿追入】連續5日以上保持高換手，但股價在小範圍劇烈震盪而未有效突破。這可能是主力「左手換右手」製造熱鬧假象，或是在洗清短線浮額。高位追入風險極高，方向尚未明朗。建議：採觀望策略，不要追入熱鬧假象。若向下跌破支撐，立即離場。');
             } else if (distributionPrecursorCount === 1) {
-                light = 'yellow';
-                signalTag = '高位初現疲態';
-                rules.push('高位出現單一衰退前兆 (如量能不濟或指標背離)。目前尚未全面轉弱，但上漲動能已受阻。建議：持股者縮緊移動停利空間，不宜再加碼。');
+                light = 'red';
+                signalTag = '高位初現疲態⛔';
+                rules.push('⛔ 【高位勿追入】高位出現單一衰退前兆 (如量能不濟或指標背離)。上漲動能已受阻，高位追入風險報酬比極差。建議：持股者縮緊移動停利空間，不宜再加碼。未持股者切勿追入。');
             } else if (isHighTurnover && positionPercent > 70) {
                 // High turnover at high position, not extreme
-                light = 'yellow';
-                signalTag = '高位追漲風險';
-                rules.push('高位出現明顯放量（超過均量2倍），代表有人在積極賣出，同時也有人積極買入，多空激烈廝殺。在高位出現此現象往往是短期頂點特徵。建議：持股者設定嚴格停利點（距成本+20%以上），絕對不追高加碼。若收盤出現長上影線，視為明確賣出訊號。');
+                light = 'red';
+                signalTag = '高位追漲風險⛔';
+                rules.push('⛔ 【高位勿追入】高位出現明顯放量（超過均量2倍），多空激烈廝殺，往往是短期頂點特徵。高位追入風險極大。建議：持股者設定嚴格停利點（距成本+20%以上），絕對不追高加碼。若收盤出現長上影線，視為明確賣出訊號。');
             } else if (isShrinkingTurnover && positionPercent > 70) {
                 // Signal 4 in high zone: 籌碼鎖定惜售
-                light = 'yellow';
-                signalTag = '高位量縮惜售';
-                rules.push('高位量能萎縮，代表主力惜售，沒有人急著在高位拋售，賣壓很輕。這是「強者恆強」的高位特徵，股價容易維持高位或緩步盤升。建議：持股者可繼續持有，不必急於獲利了結。但請設定移動停利（trailing stop），一旦量能突然放大且出現大陰線，必須立即停利出場。');
+                light = 'red';
+                signalTag = '高位量縮惜售⛔';
+                rules.push('⛔ 【高位勿追入】高位量能萎縮，籌碼鎖定，賣壓較輕，股價可能維持高位。但對未持股者而言，高位追入風險報酬比不佳。建議：未持股者不建議追高進場。持股者可繼續持有，設好移動停利保護獲利。');
             } else {
-                light = 'yellow';
-                signalTag = '高位整理觀察';
-                rules.push('股價在相對高位橫盤整理，量能平穩無特殊異常。目前尚無明確出貨跡象，但高位本身追漲風險較高。建議：未持股者不建議追高進場，風險報酬比不佳。持股者繼續持有但需提高警戒，密切觀察是否出現紅黃燈衰退訊號，設好移動停利保護獲利。');
+                light = 'red';
+                signalTag = '高位整理觀察⛔';
+                rules.push('⛔ 【高位勿追入】股價在相對高位橫盤整理，量能平穩無特殊異常。高位追入風險報酬比不佳，目前不適合新資金進場。持股者繼續持有但需提高警戒，密切觀察是否出現出貨訊號，設好移動停利保護獲利。');
             }
         } else {
             // Middle position 30~60 — 炒作進行中觀察區

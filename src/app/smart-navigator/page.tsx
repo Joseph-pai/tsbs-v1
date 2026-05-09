@@ -232,20 +232,21 @@ function ResultCard({ result, stockId, stockName }: { result: any, stockId: stri
             </div>
 
             {/* Distribution Warning Card */}
-            {result.distribution && result.distribution.level !== 'none' && (() => {
+            {result.distribution && (() => {
                 const dist = result.distribution;
-                const lvl = dist.level as 'watch' | 'warning' | 'alert';
+                const lvl = dist.level as 'safe' | 'watch' | 'warning' | 'alert';
                 const isAlert = lvl === 'alert';
                 const isWarning = lvl === 'warning';
+                const isSafe = lvl === 'safe';
 
-                const borderColor = isAlert ? 'border-rose-500/50' : isWarning ? 'border-orange-500/50' : 'border-amber-500/40';
-                const bgColor = isAlert ? 'bg-rose-500/5' : isWarning ? 'bg-orange-500/5' : 'bg-amber-500/5';
-                const glowStyle = isAlert ? '0 0 25px rgba(244,63,94,0.18)' : isWarning ? '0 0 25px rgba(249,115,22,0.18)' : '';
-                const titleColor = isAlert ? 'text-rose-400' : isWarning ? 'text-orange-400' : 'text-amber-400';
-                const dotColor = isAlert ? 'bg-rose-400' : isWarning ? 'bg-orange-400' : 'bg-amber-400';
-                const actionBg = isAlert ? 'bg-rose-500/10 border-rose-500/20' : isWarning ? 'bg-orange-500/10 border-orange-500/20' : 'bg-amber-500/10 border-amber-500/20';
+                const borderColor = isAlert ? 'border-rose-500/50' : isWarning ? 'border-orange-500/50' : isSafe ? 'border-emerald-500/30' : 'border-amber-500/40';
+                const bgColor = isAlert ? 'bg-rose-500/5' : isWarning ? 'bg-orange-500/5' : isSafe ? 'bg-emerald-500/5' : 'bg-amber-500/5';
+                const glowStyle = isAlert ? '0 0 25px rgba(244,63,94,0.18)' : isWarning ? '0 0 25px rgba(249,115,22,0.18)' : isSafe ? '0 0 20px rgba(16,185,129,0.1)' : '';
+                const titleColor = isAlert ? 'text-rose-400' : isWarning ? 'text-orange-400' : isSafe ? 'text-emerald-400' : 'text-amber-400';
+                const dotColor = isAlert ? 'bg-rose-400' : isWarning ? 'bg-orange-400' : isSafe ? 'bg-emerald-400' : 'bg-amber-400';
+                const actionBg = isAlert ? 'bg-rose-500/10 border-rose-500/20' : isWarning ? 'bg-orange-500/10 border-orange-500/20' : isSafe ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-amber-500/10 border-amber-500/20';
 
-                const levelLabel = isAlert ? '🔴 出貨進行中' : isWarning ? '🟠 出貨準備前兆' : '🟡 留意觀察';
+                const levelLabel = isAlert ? '🔴 出貨進行中' : isWarning ? '🟠 出貨準備前兆' : isSafe ? '🟢 目前無出貨跡象' : '🟡 留意觀察';
 
                 const explanation = dist.isViolentDistribution
                     ? '高位爆出極端大量或伴隨長上影線（避雷針）。主力正借助市場熱情大量倒貨給散戶，散戶此時正在成為接盤方。這是最危險的籌碼轉移訊號，股價隨時可能急轉直下。'
@@ -253,12 +254,16 @@ function ResultCard({ result, stockId, stockName }: { result: any, stockId: stri
                     ? '多重前兆同時觸發，且當日出現高換手放量。主力正利用盤整掩護，進行「溫水煮青蛙」式的緩慢派發。'
                     : isWarning
                     ? '多個主力撤退前兆同時出現，顯示主力可能已開始慢慢分批出貨，但尚未進入大規模傾倒階段。此為早期預警窗口，是最後可以從容規劃出場的時機。'
+                    : isSafe
+                    ? '目前沒有任何主力出貨的前兆訊號。股價尚在主力能控制的區間內運行，籌碼面置穩定，目前適合繼續持有或觀察。'
                     : '出現一個主力動態異常跡象。單一訊號尚不構成警報，但在高位出現任何異常均不可忽視，需提高警覺並停止追加買入。';
 
                 const actionText = isAlert
                     ? '立即停損離場，不等反彈、不抱僥倖。見到此訊號，資金保全優先於任何獲利期待。寧可少賺，絕不讓已有獲利大量縮水。'
                     : isWarning
                     ? '分批縮減持倉 30%~50%，將剩餘部位的停利點上移，設置移動停利保護獲利。在警報解除前絕對不追加買入。'
+                    : isSafe
+                    ? '目前可安心持有，持續觀察量價變化。設定移動停利點，一旦量價出現異常立即重新評估風險。'
                     : '停止追加買入，開始規劃停利計畫。將停利點上移至成本 +15% 以上，密切觀察後續量價變化，若再出現一個前兆訊號即升級為橙色警報。';
 
                 const signals: { text: string; desc: string }[] = [];
@@ -273,23 +278,25 @@ function ResultCard({ result, stockId, stockName }: { result: any, stockId: stri
                         style={glowStyle ? { boxShadow: glowStyle } : {}}
                     >
                         <div className={`font-black text-base mb-1 flex items-center gap-2 ${titleColor}`}>
-                            <AlertTriangle className="w-5 h-5" />
+                            {isSafe ? <span className="text-xl">✅</span> : <AlertTriangle className="w-5 h-5" />}
                             主力動向預警
                         </div>
                         <div className={`text-xl font-black mb-5 ${titleColor}`}>{levelLabel}</div>
 
                         {/* Triggered signals */}
-                        <div className="space-y-2 mb-5">
-                            {signals.map((s, i) => (
-                                <div key={i} className="flex items-start gap-2.5 text-sm bg-black/20 rounded-xl p-3">
-                                    <div className={`w-2 h-2 rounded-full flex-shrink-0 mt-1.5 ${dotColor}`} />
-                                    <div>
-                                        <span className="text-slate-100 font-black">{s.text}</span>
-                                        <span className="text-slate-400 ml-2">{s.desc}</span>
+                        {signals.length > 0 && (
+                            <div className="space-y-2 mb-5">
+                                {signals.map((s, i) => (
+                                    <div key={i} className="flex items-start gap-2.5 text-sm bg-black/20 rounded-xl p-3">
+                                        <div className={`w-2 h-2 rounded-full flex-shrink-0 mt-1.5 ${dotColor}`} />
+                                        <div>
+                                            <span className="text-slate-100 font-black">{s.text}</span>
+                                            <span className="text-slate-400 ml-2">{s.desc}</span>
+                                        </div>
                                     </div>
-                                </div>
-                            ))}
-                        </div>
+                                ))}
+                            </div>
+                        )}
 
                         {/* Explanation */}
                         <div className="bg-black/30 rounded-xl p-4 mb-3 border border-white/5">
@@ -418,7 +425,7 @@ export default function SmartNavigatorPage() {
     const [filterCompleted, setFilterCompleted] = useState(false);
     const [filterMode, setFilterMode] = useState<'green' | 'distribution'>('green');
     const [lightFilter, setLightFilter] = useState<'all' | 'green' | 'yellow' | 'red'>('all');
-    const [distributionFilter, setDistributionFilter] = useState<'all' | 'alert' | 'warning' | 'watch'>('all');
+    const [distributionFilter, setDistributionFilter] = useState<'all' | 'alert' | 'warning' | 'watch' | 'safe'>('all');
 
     // Print State
     const [isPrinting, setIsPrinting] = useState(false);
@@ -531,7 +538,7 @@ export default function SmartNavigatorPage() {
             const BATCH_SIZE = 5;
             const validResults: any[] = [];
             const maxPosPercent = parseInt(maxPosition, 10);
-            const levelOrder: Record<string, number> = { alert: 0, warning: 1, watch: 2 };
+            const levelOrder: Record<string, number> = { alert: 0, warning: 1, watch: 2, safe: 3 };
 
             for (let i = 0; i < uniqueStocks.length; i += BATCH_SIZE) {
                 const batch = uniqueStocks.slice(i, i + BATCH_SIZE);
@@ -547,12 +554,13 @@ export default function SmartNavigatorPage() {
                         const json = await res.json();
                         if (json.success && json.data) {
                             if (filterMode === 'green') {
-                                // 主力進場：顯示所有有 signalTag 的股票（綠/黃/紅均含）
+                                // 主力進場：顯示所有有 signalTag 的股票（綠/黃/紅均含，紅燈附加警示標記）
                                 if (json.data.signalTag !== null && json.data.signalTag !== undefined) {
-                                    return { stockId: stock.id, stockName: stock.name, data: json.data, distributionLevel: null };
+                                    return { stockId: stock.id, stockName: stock.name, data: json.data, distributionLevel: json.data.distribution?.level };
                                 }
                             } else {
-                                if (json.data.distribution && json.data.distribution.level !== 'none') {
+                                // 出貨預警：顯示所有股票（含 safe），讓用戶看到安全與危險的對比
+                                if (json.data.distribution) {
                                     return { stockId: stock.id, stockName: stock.name, data: json.data, distributionLevel: json.data.distribution.level };
                                 }
                             }
@@ -568,7 +576,7 @@ export default function SmartNavigatorPage() {
             }
 
             if (filterMode === 'distribution') {
-                validResults.sort((a, b) => (levelOrder[a.distributionLevel] ?? 3) - (levelOrder[b.distributionLevel] ?? 3));
+                validResults.sort((a, b) => (levelOrder[a.distributionLevel] ?? 4) - (levelOrder[b.distributionLevel] ?? 4));
             }
             if (filterMode === 'green') {
                 const lightOrder: Record<string, number> = { green: 0, yellow: 1, red: 2 };
@@ -825,7 +833,8 @@ export default function SmartNavigatorPage() {
                                     { key: 'alert', label: '🔴 出貨進行中', activeCls: 'bg-rose-500/20 border-rose-500 text-rose-400 shadow-[0_0_12px_rgba(244,63,94,0.3)]', inactiveCls: 'bg-black/40 border-slate-700 text-slate-400 hover:bg-rose-500/10 hover:border-rose-500/40 hover:text-rose-400' },
                                     { key: 'warning', label: '🟠 出貨準備前兆', activeCls: 'bg-orange-500/20 border-orange-500 text-orange-400 shadow-[0_0_12px_rgba(249,115,22,0.3)]', inactiveCls: 'bg-black/40 border-slate-700 text-slate-400 hover:bg-orange-500/10 hover:border-orange-500/40 hover:text-orange-400' },
                                     { key: 'watch', label: '🟡 留意觀察', activeCls: 'bg-amber-500/20 border-amber-500 text-amber-400 shadow-[0_0_12px_rgba(245,158,11,0.3)]', inactiveCls: 'bg-black/40 border-slate-700 text-slate-400 hover:bg-amber-500/10 hover:border-amber-500/40 hover:text-amber-400' },
-                                ] as { key: 'all'|'alert'|'warning'|'watch', label: string, activeCls: string, inactiveCls: string }[]).map(({ key, label, activeCls, inactiveCls }) => {
+                                    { key: 'safe', label: '🟢 無出貨跡象', activeCls: 'bg-emerald-500/20 border-emerald-500 text-emerald-400 shadow-[0_0_12px_rgba(16,185,129,0.3)]', inactiveCls: 'bg-black/40 border-slate-700 text-slate-400 hover:bg-emerald-500/10 hover:border-emerald-500/40 hover:text-emerald-400' },
+                                ] as { key: 'all'|'alert'|'warning'|'watch'|'safe', label: string, activeCls: string, inactiveCls: string }[]).map(({ key, label, activeCls, inactiveCls }) => {
                                     const count = key === 'all'
                                         ? filterResults.length
                                         : filterResults.filter(r => r.distributionLevel === key).length;
