@@ -232,7 +232,7 @@ function ResultCard({ result, stockId, stockName }: { result: any, stockId: stri
             </div>
 
             {/* Distribution Warning Card */}
-            {result.distribution && (() => {
+            {result.distribution && result.distribution.level !== 'safe' && (() => {
                 const dist = result.distribution;
                 const lvl = dist.level as 'safe' | 'watch' | 'warning' | 'alert';
                 const isAlert = lvl === 'alert';
