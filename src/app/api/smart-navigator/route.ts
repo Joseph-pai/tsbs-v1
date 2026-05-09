@@ -166,10 +166,14 @@ export async function GET(request: Request) {
 
         // Composite Distribution Warning Level
         const distributionPrecursorCount = [hasMacdDivergence, isVolumeDeclineAtHigh, isHighStagnant].filter(Boolean).length;
+        
+        // 新增暴力出貨布林值
+        const isViolentDistribution = positionPercent > 70 && (isExtremelyHighTurnover || (isHighTurnover && hasLongUpperShadow));
+        
         let distributionLevel: 'none' | 'watch' | 'warning' | 'alert' = 'none';
         if (positionPercent > 60) {
-            if (distributionPrecursorCount >= 2 && (isHighTurnover || isExtremelyHighTurnover) && positionPercent > 70) {
-                distributionLevel = 'alert';
+            if (isViolentDistribution || (distributionPrecursorCount >= 2 && (isHighTurnover || isExtremelyHighTurnover) && positionPercent > 70)) {
+                distributionLevel = 'alert'; // 暴力出貨或放量衰退都屬於最高級別
             } else if (distributionPrecursorCount >= 2) {
                 distributionLevel = 'warning';
             } else if (distributionPrecursorCount === 1) {
@@ -360,6 +364,7 @@ export async function GET(request: Request) {
                     isHighStagnant,
                     highStagnationDays,
                     precursorCount: distributionPrecursorCount,
+                    isViolentDistribution,
                 },
                 interpretations: rules,
             }
