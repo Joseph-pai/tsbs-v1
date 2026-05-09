@@ -80,9 +80,17 @@ export async function GET(request: Request) {
         const upperShadow = latestHigh - Math.max(latestClose, latestOpen);
         const hasLongUpperShadow = body > 0 && upperShadow > body * 2;
 
-        // Calculate 20MA
+        // Calculate 5MA, 20MA, 60MA
         const reversedClose = [...closePrices].reverse();
+        const ma5  = calculateSMA(reversedClose, 5);
         const ma20 = calculateSMA(reversedClose, 20);
+        const ma60 = calculateSMA(reversedClose, 60);
+
+        // 【強剴1】均線排列判斷
+        // 多頭排列：MA5 > MA20 > MA60 → 趨勢向上，綠燈可信度高
+        // 空頭排列：MA5 < MA20 < MA60 → 趨勢向下，即使攞量也要降低可信度
+        const isMaBullishAligned = !!(ma5 && ma20 && ma60 && ma5 > ma20 && ma20 > ma60);
+        const isMaBearishAligned = !!(ma5 && ma20 && ma60 && ma5 < ma20 && ma20 < ma60);
 
         // Calculate MACD
         const macdData = calculateMACD(closePrices);
@@ -225,9 +233,17 @@ export async function GET(request: Request) {
             // Low position zone
             rules.push(`目前股價處於近 ${period} 日相對低位（<30%）。`);
             if (isHighTurnover) {
-                light = 'green';
-                signalTag = '低位放量建倉';
-                rules.push('成交量明顯放大（超過近期均量2倍），主力正積極在低檔承接籌碼。建議：可分批買入，第一批買入30%部位，剩餘等量能持續放大後再加碼，以當日最低價為停損參考。');
+                if (isMaBearishAligned) {
+                    // 年线空頭排列：即使低位出現放量也不可信，降級為黃燈
+                    light = 'yellow';
+                    signalTag = '低位放量但趨勢向下';
+                    rules.push('成交量放大，但 MA5 < MA20 < MA60，均線為空頭排列，趨勢尚未羭轉。放量可能是反彈賣壓而非主力進場。建議：觀望為主，等待均線由空轉多後再考慮介入。');
+                } else {
+                    light = 'green';
+                    signalTag = isMaBullishAligned ? '低位放量建倉 (多頭確認)' : '低位放量建倉';
+                    const maNote = isMaBullishAligned ? '；且 MA5>MA20>MA60 多頭排列，趨勢向上確認，可信度極高。' : '；均線尚未形成多頭排列，主力建倉信話屬中等。';
+                    rules.push(`成交量明顯放大（超過近期均量2倍），主力正積極在低檔承接籌碼${maNote}建議：可分批買入，第一批買入30%部位，剩餘等量能持續放大後再加碼，以當日最低價為停損參考。`);
+                }
             } else if (isShrinkingTurnover && isMacdPositive) {
                 light = 'green';
                 signalTag = '低位縮量蓄勢';
@@ -352,7 +368,11 @@ export async function GET(request: Request) {
                 },
                 metrics: {
                     close: latestClose,
+                    ma5: ma5 ? Number(ma5.toFixed(2)) : null,
                     ma20: ma20 ? Number(ma20.toFixed(2)) : null,
+                    ma60: ma60 ? Number(ma60.toFixed(2)) : null,
+                    isMaBullishAligned,
+                    isMaBearishAligned,
                     positionPercent: Number(positionPercent.toFixed(1)),
                     isHighTurnover,
                     turnoverRate: turnoverRate > 0 ? Number(turnoverRate.toFixed(2)) : null,
