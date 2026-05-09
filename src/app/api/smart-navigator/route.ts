@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { ExchangeClient } from '@/lib/exchange';
 import { getTotalShares } from '@/lib/shares';
-import { calculateSMA, calculateMACD, calculateMACDFull } from '@/services/indicators';
+import { calculateSMA, calculateMACD, calculateMACDFull, calculateKD } from '@/services/indicators';
 
 export async function GET(request: Request) {
     try {
@@ -242,6 +242,32 @@ export async function GET(request: Request) {
             isMacdJustTurnedPositive = prevDif < 0 && currDif >= 0;
         }
 
+        // 【強化4】計算 KD 指標與底背離
+        const kdData = calculateKD(prices);
+        let hasKDBottomDivergence = false;
+        if (kdData && prices.length >= 20) {
+            const currentK = kdData.kArray[kdData.kArray.length - 1];
+            if (currentK < 20) { // 超賣區
+                const lookback = 20;
+                let prevLowIdx = -1;
+                let prevLowPrice = Infinity;
+                for (let i = prices.length - lookback; i < prices.length - 3; i++) {
+                    if (prices[i].min < prevLowPrice) {
+                        prevLowPrice = prices[i].min;
+                        prevLowIdx = i;
+                    }
+                }
+                if (prevLowIdx !== -1) {
+                    const currentLow = latestLow;
+                    const prevKValue = kdData.kArray[prevLowIdx];
+                    // 股價創新低或持平，但K值未創新低
+                    if (currentLow <= prevLowPrice * 1.02 && currentK > prevKValue) {
+                        hasKDBottomDivergence = true;
+                    }
+                }
+            }
+        }
+
         // Prices
         const buyPrice = Number(((latestHigh + latestLow) / 2).toFixed(2));
         const stopLossPrice = Number((ma20 || latestLow).toFixed(2));
@@ -291,8 +317,9 @@ export async function GET(request: Request) {
                 rules.push('底部成交量溫和回升（約為近期均量1.2~2倍），已有資金開始試探性進場，MACD動能轉正。建議：少量布局（10%～20%），若後續量能持續放大則逐步加碼至50%部位。');
             } else if (isMacdJustTurnedPositive && positionPercent < 20) {
                 light = 'green';
-                signalTag = 'MACD低位轉正';
-                rules.push('MACD動能指標剛從負值轉為正值，且股價處於極低位置，是技術面「由跌轉漲」的關鍵轉折訊號。建議：少量試單（10%～15%），以20日均線為停損，確認量能跟上後再加碼。');
+                signalTag = hasKDBottomDivergence ? '底部雙重確認 (強)' : 'MACD低位轉正';
+                const kdNote = hasKDBottomDivergence ? '且同步出現 KD 超賣區底背離，是勝率極高的底部雙重確認訊號！' : '是技術面「由跌轉漲」的關鍵轉折訊號。';
+                rules.push(`MACD動能指標剛從負值轉為正值，且股價處於極低位置，${kdNote}建議：可建立較積極的倉位（20%～30%），以20日均線為停損，確認量能跟上後再加碼。`);
             } else if (isShrinkingTurnover) {
                 light = 'yellow';
                 signalTag = '主力暗中佈局';

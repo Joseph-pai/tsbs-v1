@@ -148,3 +148,45 @@ export const calculateMACDFull = (prices: number[], shortPeriod = 12, longPeriod
     const macdArray = calculateEMA(difArray, signalPeriod);
     return { difArray, macdArray };
 };
+
+/**
+ * Calculate KD (Stochastic Oscillator)
+ * Returns full K and D arrays.
+ */
+export const calculateKD = (prices: {max: number, min: number, close: number}[], period = 9) => {
+    if (prices.length < period) return null;
+    
+    const kArray: number[] = [];
+    const dArray: number[] = [];
+    
+    let prevK = 50;
+    let prevD = 50;
+    
+    for (let i = 0; i < prices.length; i++) {
+        if (i < period - 1) {
+            kArray.push(50);
+            dArray.push(50);
+            continue;
+        }
+        
+        const slice = prices.slice(i - period + 1, i + 1);
+        const highestHigh = Math.max(...slice.map(p => p.max));
+        const lowestLow = Math.min(...slice.map(p => p.min));
+        
+        let rsv = 50;
+        if (highestHigh !== lowestLow) {
+            rsv = ((prices[i].close - lowestLow) / (highestHigh - lowestLow)) * 100;
+        }
+        
+        const currentK = prevK * (2/3) + rsv * (1/3);
+        const currentD = prevD * (2/3) + currentK * (1/3);
+        
+        kArray.push(currentK);
+        dArray.push(currentD);
+        
+        prevK = currentK;
+        prevD = currentD;
+    }
+    
+    return { kArray, dArray };
+};
