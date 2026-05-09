@@ -154,6 +154,41 @@ export async function GET(request: Request) {
             volumeRatio = vol5MA > 0 ? latestVolumeShares / vol5MA : 0;
         }
 
+        // 【強化6】大盤相對強弱 (Relative Strength)
+        let isRelativeStrengthHigh = false;
+        try {
+            const taiexHistory = await ExchangeClient.getTaiexHistory(1);
+            if (taiexHistory.length >= 6 && prices.length >= 6) {
+                const recentPrices = prices.slice(-6);
+                let rsPositiveDays = 0;
+                let taiexTotalChange = 0;
+                
+                for (let i = 1; i < recentPrices.length; i++) {
+                    const stockDate = recentPrices[i].date;
+                    const prevStockDate = recentPrices[i-1].date;
+                    
+                    const tDay = taiexHistory.find(t => t.date === stockDate);
+                    const tPrevDay = taiexHistory.find(t => t.date === prevStockDate);
+                    
+                    if (tDay && tPrevDay) {
+                        const stockChange = ((recentPrices[i].close - recentPrices[i-1].close) / recentPrices[i-1].close) * 100;
+                        const marketChange = ((tDay.close - tPrevDay.close) / tPrevDay.close) * 100;
+                        taiexTotalChange += marketChange;
+                        if (stockChange > marketChange) {
+                            rsPositiveDays++;
+                        }
+                    }
+                }
+                
+                // 大盤偏弱或盤整 (近5日總漲幅<=0.5%)，但個股有3天以上跑贏大盤，且處於低位
+                if (taiexTotalChange <= 0.5 && rsPositiveDays >= 3 && positionPercent < 35) {
+                    isRelativeStrengthHigh = true;
+                }
+            }
+        } catch (e) {
+            console.error("[Relative Strength] Error:", e);
+        }
+
         // === Distribution Warning: Three Precursor Signals ===
 
         // Precursor A: MACD Top Divergence (MACD頂背離)
@@ -409,6 +444,14 @@ export async function GET(request: Request) {
                 light = 'yellow';
                 signalTag = '中位方向待定';
                 rules.push('股價在中間位置橫盤，量能平穩無特殊變化，市場多空雙方都在等待驅動方向的訊號。建議：切忌在無量的中途隨意追入，等待帶量突破（向上）或量增跌破支撐（向下）後，再根據方向決定操作。');
+            }
+        }
+
+        // 【強化6】大盤相對強弱附加說明
+        if (isRelativeStrengthHigh && (light === 'green' || light === 'yellow')) {
+            rules.push('🛡️ 【抗跌護盤】近期大盤走弱或盤整，但該股近5日多數時間表現優於大盤。逆勢抗跌通常代表主力資金在下方強勢護盤，後市一旦大盤回穩，有較高機率率先發動攻擊！');
+            if (light === 'yellow') {
+                signalTag = '逆勢抗跌 (主力護盤)';
             }
         }
 

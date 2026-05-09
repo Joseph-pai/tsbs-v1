@@ -237,6 +237,43 @@ export const ExchangeClient = {
     },
 
     /**
+     * Get TAIEX (Taiwan Capitalization Weighted Stock Index) History
+     * @param months Number of months to fetch (default 1 is usually enough for recent 5 days)
+     */
+    getTaiexHistory: async (months: number = 1): Promise<{ date: string, close: number, spread: number }[]> => {
+        try {
+            const allData: { date: string, close: number, spread: number }[] = [];
+            for (let i = 0; i < months; i++) {
+                try {
+                    const targetDate = subMonths(new Date(), i);
+                    const dateStr = format(targetDate, 'yyyyMM01');
+                    const url = `https://www.twse.com.tw/exchangeReport/FMTQIK?response=json&date=${dateStr}`;
+                    const res = await axios.get(url, { timeout: 10000 });
+                    
+                    if (res.data && res.data.data) {
+                        const parseNum = (val: string) => parseFloat(val.replace(/,/g, ''));
+                        const monthlyData = res.data.data.map((row: any[]) => ({
+                            date: normalizeAnyDate(row[0]),
+                            close: parseNum(row[4]),
+                            spread: parseNum(row[5])
+                        }));
+                        allData.push(...monthlyData);
+                    }
+                } catch (e) {
+                    console.warn(`[Exchange] Failed to fetch TAIEX month ${i}, skipping...`);
+                }
+            }
+            
+            // Deduplicate, sort by date ascending
+            const unique = Array.from(new Map(allData.map(item => [item.date, item])).values());
+            return unique.sort((a, b) => a.date.localeCompare(b.date));
+        } catch (error) {
+            console.error(`[Exchange] TAIEX History failed:`, error);
+            return [];
+        }
+    },
+
+    /**
      * Helper to determine market — checks if stock exists in TWSE Snapshot
      * This avoids TWSE network block/rate-limits caused by probing
      */
