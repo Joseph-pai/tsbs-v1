@@ -123,8 +123,30 @@ export async function GET(request: Request) {
             isExtremelyHighTurnover = vol5MA ? latestVolumeShares > (vol5MA * 4) : false;
         }
 
+
+
+        // 【強化3】籌碼集中度評分 (Accumulation Score)
+        let accumulationScore = 0;
+        if (totalShares && totalShares > 0 && prices.length >= 20) {
+            const lookbackDays = Math.min(60, prices.length - 20);
+            if (lookbackDays > 0) {
+                const startIndex = prices.length - lookbackDays;
+                for (let i = startIndex; i < prices.length; i++) {
+                    const currentClose = prices[i].close;
+                    const currentPos = periodMax === periodMin ? 0 : ((currentClose - periodMin) / (periodMax - periodMin)) * 100;
+                    
+                    const past20Turnover = prices.slice(i - 20, i).map(p => (p.Trading_Volume * 1000 / totalShares) * 100);
+                    const avg20Turn = past20Turnover.reduce((a, b) => a + b, 0) / 20;
+                    const currentTurn = (prices[i].Trading_Volume * 1000 / totalShares) * 100;
+                    
+                    if (currentPos < 35 && currentTurn > avg20Turn * 1.5) {
+                        accumulationScore++;
+                    }
+                }
+            }
+        }
+
         // === Distribution Warning: Three Precursor Signals ===
-        // (Placed after positionPercent & isHighTurnover to avoid 'used before declaration' error)
 
         // Precursor A: MACD Top Divergence (MACD頂背離)
         // Price at or above a recent high, but DIF is lower than at that peak
@@ -393,6 +415,7 @@ export async function GET(request: Request) {
                     turnoverRate: turnoverRate > 0 ? Number(turnoverRate.toFixed(2)) : null,
                     avg20Turnover: avg20Turnover > 0 ? Number(avg20Turnover.toFixed(2)) : null,
                     turnoverMultiple: turnoverMultiple > 0 ? Number(turnoverMultiple.toFixed(1)) : null,
+                    accumulationScore,
                     isStopLossFallback: !ma20
                 },
                 distribution: {

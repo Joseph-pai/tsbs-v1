@@ -183,6 +183,17 @@ function ResultCard({ result, stockId, stockName, overrideLight, overrideLightTe
                         {result.signalTag}
                     </div>
                 )}
+                {/* 【強化3】籌碼集中度徽章：只在主力進場模式且有吸籌跡象時顯示 */}
+                {result.metrics?.accumulationScore > 0 && overrideLight === undefined && (
+                    <div className={`px-3 py-1.5 rounded-xl font-black text-sm border flex items-center gap-1.5 ${
+                        result.metrics.accumulationScore >= 10 ? 'bg-rose-500/15 border-rose-500/40 text-rose-400' :
+                        result.metrics.accumulationScore >= 5 ? 'bg-orange-500/15 border-orange-500/40 text-orange-400' :
+                        'bg-amber-500/15 border-amber-500/40 text-amber-400'
+                    }`}>
+                        <span>🔥</span>
+                        <span>主力累積吸籌 {result.metrics.accumulationScore} 天</span>
+                    </div>
+                )}
             </div>
 
             {/* Traffic Light */}
