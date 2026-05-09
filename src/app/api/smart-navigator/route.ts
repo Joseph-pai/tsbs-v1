@@ -146,6 +146,14 @@ export async function GET(request: Request) {
             }
         }
 
+        // 【強化5】計算量比 (Volume Ratio)
+        let volumeRatio = 0;
+        if (volumesInShares.length >= 6) {
+            const last5Vol = volumesInShares.slice(volumesInShares.length - 6, volumesInShares.length - 1);
+            const vol5MA = last5Vol.reduce((a, b) => a + b, 0) / 5;
+            volumeRatio = vol5MA > 0 ? latestVolumeShares / vol5MA : 0;
+        }
+
         // === Distribution Warning: Three Precursor Signals ===
 
         // Precursor A: MACD Top Divergence (MACD頂背離)
@@ -304,7 +312,10 @@ export async function GET(request: Request) {
                 } else {
                     light = 'green';
                     signalTag = isMaBullishAligned ? '低位放量建倉 (多頭確認)' : '低位放量建倉';
-                    const maNote = isMaBullishAligned ? '；且 MA5>MA20>MA60 多頭排列，趨勢向上確認，可信度極高。' : '；均線尚未形成多頭排列，主力建倉信話屬中等。';
+                    let maNote = isMaBullishAligned ? '；且 MA5>MA20>MA60 多頭排列，趨勢向上確認，可信度極高。' : '；均線尚未形成多頭排列，主力建倉信話屬中等。';
+                    if (volumeRatio > 5) {
+                        maNote += '（特別注意：今日爆出超過 5 日均量 5 倍以上的【天量】，顯示有極強力的資金強勢介入，但也伴隨極大波動風險）';
+                    }
                     rules.push(`成交量明顯放大（超過近期均量2倍），主力正積極在低檔承接籌碼${maNote}建議：可分批買入，第一批買入30%部位，剩餘等量能持續放大後再加碼，以當日最低價為停損參考。`);
                 }
             } else if (isShrinkingTurnover && isMacdPositive) {
@@ -337,10 +348,11 @@ export async function GET(request: Request) {
                 // Signal 2: 炒作尾聲 — 主力暴力出貨 (最高優先級)
                 light = 'red';
                 signalTag = hasLongUpperShadow ? '主力逢高倒貨 (避雷針)' : '主力高位暴力出貨';
+                const vrWarning = volumeRatio > 5 ? '（今日爆出大於 5 倍均量的極端天量，拋售力道極為猛烈）' : '';
                 if (hasLongUpperShadow) {
-                    rules.push('⚠️ 高位出現長上影線並伴隨放量。這是主力趁市場熱情高漲大量賣出的典型訊號（俗稱「射擊之星」）。上影線越長，代表當日賣壓越強，大量散戶正在接盤。建議：無論獲利多少，必須立即減碼50%以上，切勿等待反彈。剩餘持股設嚴格停損，高位反彈即為出場機會。');
+                    rules.push(`⚠️ 高位出現長上影線並伴隨放量${vrWarning}。這是主力趁市場熱情高漲大量賣出的典型訊號（俗稱「射擊之星」）。上影線越長，代表當日賣壓越強，大量散戶正在接盤。建議：無論獲利多少，必須立即減碼50%以上，切勿等待反彈。剩餘持股設嚴格停損，高位反彈即為出場機會。`);
                 } else {
-                    rules.push('⚠️ 高位爆出超大量（超過近期均量4倍以上）。這通常是主力藉助利多消息或市場狂熱，在最高點附近大量傾倒籌碼的訊號。散戶正在成為主力的接盤方。建議：見此訊號必須立即停損離場，寧可少賺，絕不在主力出貨時繼續持有。');
+                    rules.push(`⚠️ 高位爆出超大量（超過近期均量4倍以上）${vrWarning}。這通常是主力藉助利多消息或市場狂熱，在最高點附近大量傾倒籌碼的訊號。散戶正在成為主力的接盤方。建議：見此訊號必須立即停損離場，寧可少賺，絕不在主力出貨時繼續持有。`);
                 }
             } else if (distributionPrecursorCount >= 2) {
                 // 次高優先級：動能衰竭/緩慢派發
@@ -443,6 +455,7 @@ export async function GET(request: Request) {
                     avg20Turnover: avg20Turnover > 0 ? Number(avg20Turnover.toFixed(2)) : null,
                     turnoverMultiple: turnoverMultiple > 0 ? Number(turnoverMultiple.toFixed(1)) : null,
                     accumulationScore,
+                    volumeRatio: Number(volumeRatio.toFixed(2)),
                     isStopLossFallback: !ma20
                 },
                 distribution: {
