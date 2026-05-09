@@ -156,9 +156,12 @@ function MiniCalendar({ recordDates, selectedDate, onSelectDate }: MiniCalendarP
 }
 
 // --- Result Card Component ---
-function ResultCard({ result, stockId, stockName }: { result: any, stockId: string, stockName?: string }) {
+function ResultCard({ result, stockId, stockName, overrideLight, overrideLightText }: { result: any, stockId: string, stockName?: string, overrideLight?: string, overrideLightText?: string }) {
     const [showDetails, setShowDetails] = useState(false);
     const [activeTooltip, setActiveTooltip] = useState<string | null>(null);
+
+    const displayLight = overrideLight ?? result.light;
+    const displayLightText = overrideLightText ?? lightText[result.light as keyof typeof lightText];
 
     return (
         <div className="animate-in fade-in slide-in-from-bottom-8 duration-700 space-y-6 mb-12">
@@ -222,12 +225,12 @@ function ResultCard({ result, stockId, stockName }: { result: any, stockId: stri
                     </div>
                 )}
                 <div className="flex gap-4 p-4 bg-black/40 rounded-full border border-white/5 mb-6">
-                    <div className={`w-12 h-12 rounded-full border-2 ${result.light === 'red' ? lightColors.red + ' border-rose-300' : 'bg-slate-800 border-slate-700 opacity-30'} transition-all duration-500`} />
-                    <div className={`w-12 h-12 rounded-full border-2 ${result.light === 'yellow' ? lightColors.yellow + ' border-amber-300' : 'bg-slate-800 border-slate-700 opacity-30'} transition-all duration-500`} />
-                    <div className={`w-12 h-12 rounded-full border-2 ${result.light === 'green' ? lightColors.green + ' border-emerald-300' : 'bg-slate-800 border-slate-700 opacity-30'} transition-all duration-500`} />
+                    <div className={`w-12 h-12 rounded-full border-2 ${displayLight === 'red' ? lightColors.red + ' border-rose-300' : 'bg-slate-800 border-slate-700 opacity-30'} transition-all duration-500`} />
+                    <div className={`w-12 h-12 rounded-full border-2 ${displayLight === 'yellow' ? lightColors.yellow + ' border-amber-300' : 'bg-slate-800 border-slate-700 opacity-30'} transition-all duration-500`} />
+                    <div className={`w-12 h-12 rounded-full border-2 ${displayLight === 'green' ? lightColors.green + ' border-emerald-300' : 'bg-slate-800 border-slate-700 opacity-30'} transition-all duration-500`} />
                 </div>
-                <div className={`text-2xl font-black ${result.light === 'green' ? 'text-emerald-400' : result.light === 'yellow' ? 'text-amber-400' : 'text-rose-400'}`}>
-                    {lightText[result.light as keyof typeof lightText]}
+                <div className={`text-2xl font-black ${displayLight === 'green' ? 'text-emerald-400' : displayLight === 'yellow' ? 'text-amber-400' : 'text-rose-400'}`}>
+                    {displayLightText}
                 </div>
             </div>
 
@@ -895,7 +898,17 @@ export default function SmartNavigatorPage() {
                                                     {greenBadge.text}
                                                 </div>
                                             )}
-                                            <ResultCard result={res.data} stockId={res.stockId} stockName={res.stockName} />
+                                            {/* 出貨預警模式：依 distributionLevel 計算對應燈號與文字 */}
+                                            {(() => {
+                                                const dl = res.distributionLevel;
+                                                const overrideLight = filterMode === 'distribution'
+                                                    ? (dl === 'alert' ? 'red' : dl === 'warning' ? 'yellow' : dl === 'watch' ? 'yellow' : 'green')
+                                                    : undefined;
+                                                const overrideLightText = filterMode === 'distribution'
+                                                    ? (dl === 'alert' ? '風險警告' : dl === 'warning' ? '前期警告' : dl === 'watch' ? '謹慎觀察' : '持股安全')
+                                                    : undefined;
+                                                return <ResultCard result={res.data} stockId={res.stockId} stockName={res.stockName} overrideLight={overrideLight} overrideLightText={overrideLightText} />;
+                                            })()}
                                         </div>
                                     );
                                 })}
