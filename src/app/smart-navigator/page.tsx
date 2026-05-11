@@ -447,38 +447,58 @@ export default function SmartNavigatorPage() {
     const handleDownload = async () => {
         if (isPrinting) return;
         setIsPrinting(true);
+        
+        // 記錄當前滾動位置，方便截圖後恢復
+        const originalScrollY = window.scrollY;
+        
         try {
             const html2canvas = (await import('html2canvas')).default;
             const element = document.getElementById('smart-navigator-content');
             if (!element) return;
-            // 使用真實的 scroll 偏移量，確保截圖位置正確
-            const scrollX = window.scrollX || window.pageXOffset || 0;
-            const scrollY = window.scrollY || window.pageYOffset || 0;
-            // 取元素實際完整高度（自動篩選結果可能很長）
-            const fullWidth = Math.max(document.documentElement.scrollWidth, element.scrollWidth);
-            const fullHeight = Math.max(document.documentElement.scrollHeight, element.scrollHeight);
+
+            // 先滾動到頂部，這是 html2canvas 處理長頁面最穩定的做法
+            window.scrollTo(0, 0);
+            
+            // 增加等待時間，確保長頁面中的所有卡片都已渲染完成
+            await new Promise(resolve => setTimeout(resolve, 300));
+
             const canvas = await html2canvas(element, {
                 backgroundColor: '#020617',
                 scale: 2,
                 useCORS: true,
-                scrollX: -scrollX,
-                scrollY: -scrollY,
-                windowWidth: fullWidth,
-                windowHeight: fullHeight,
-                onclone: (_doc: Document, clonedElement: HTMLElement) => {
-                    // 確保 clone 後的元素可完整展開，不被 overflow 裁切
-                    clonedElement.style.height = 'auto';
-                    clonedElement.style.minHeight = '0';
-                    clonedElement.style.overflow = 'visible';
-                },
+                allowTaint: true,
+                scrollX: 0,
+                scrollY: 0,
+                width: element.scrollWidth,
+                height: element.scrollHeight,
+                windowWidth: element.scrollWidth,
+                windowHeight: element.scrollHeight,
+                onclone: (clonedDoc) => {
+                    const clonedElement = clonedDoc.getElementById('smart-navigator-content');
+                    if (clonedElement) {
+                        clonedElement.style.height = 'auto';
+                        clonedElement.style.overflow = 'visible';
+                        clonedElement.style.paddingBottom = '40px'; // 留點底邊
+                    }
+                }
             });
+
+            // 檢查畫布是否有效
+            if (canvas.width === 0 || canvas.height === 0) {
+                throw new Error('產生的圖片內容為空，請稍後再試或縮小搜尋範圍。');
+            }
+
             const link = document.createElement('a');
-            link.download = `智能選股導航_分析報告_${new Date().toLocaleDateString('zh-TW', { year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/\//g, '')}.png`;
+            const dateStr = new Date().toLocaleDateString('zh-TW', { year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/\//g, '');
+            link.download = `智能選股導航_分析報告_${dateStr}.png`;
             link.href = canvas.toDataURL('image/png');
             link.click();
-        } catch (err) {
+        } catch (err: any) {
             console.error('截圖失敗:', err);
+            alert(err.message || '截圖失敗，請重試');
         } finally {
+            // 恢復滾動位置
+            window.scrollTo(0, originalScrollY);
             setIsPrinting(false);
         }
     };
