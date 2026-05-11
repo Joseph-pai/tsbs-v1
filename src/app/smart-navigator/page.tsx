@@ -470,15 +470,22 @@ export default function SmartNavigatorPage() {
                 scrollX: 0,
                 scrollY: 0,
                 width: element.scrollWidth,
-                height: element.scrollHeight,
+                height: element.scrollHeight + 100, // 增加 100px 緩衝確保底部不被切掉
                 windowWidth: element.scrollWidth,
-                windowHeight: element.scrollHeight,
+                windowHeight: element.scrollHeight + 100,
                 onclone: (clonedDoc) => {
                     const clonedElement = clonedDoc.getElementById('smart-navigator-content');
                     if (clonedElement) {
+                        // 強制克隆環境的所有父容器展開，不限制高度與溢出
+                        clonedDoc.documentElement.style.height = 'auto';
+                        clonedDoc.documentElement.style.overflow = 'visible';
+                        clonedDoc.body.style.height = 'auto';
+                        clonedDoc.body.style.overflow = 'visible';
+                        
                         clonedElement.style.height = 'auto';
                         clonedElement.style.overflow = 'visible';
-                        clonedElement.style.paddingBottom = '40px'; // 留點底邊
+                        clonedElement.style.maxWidth = 'none'; // 移除寬度限制確保佈局完整
+                        clonedElement.style.paddingBottom = '100px'; // 增加底部內距
                     }
                 }
             });
