@@ -456,15 +456,26 @@ export default function SmartNavigatorPage() {
             const element = document.getElementById('smart-navigator-content');
             if (!element) return;
 
+            // --- 核心優化：動態縮放 (Dynamic Scaling) ---
+            const scrollHeight = element.scrollHeight;
+            const SAFARI_LIMIT = 16000; // Safari/iOS 的畫布高度極限
+            
+            // 預設 scale 為 1.2，若高度超過極限則動態調降
+            let dynamicScale = 1.2;
+            if (scrollHeight * dynamicScale > SAFARI_LIMIT) {
+                dynamicScale = Math.max(0.4, SAFARI_LIMIT / scrollHeight); 
+                console.log(`[智能導航] 檢測到超長列表 (${scrollHeight}px)，自動將縮放調整為 ${dynamicScale.toFixed(2)} 以確保下載成功。`);
+            }
+
             // 先滾動到頂部，這是 html2canvas 處理長頁面最穩定的做法
             window.scrollTo(0, 0);
             
-            // 增加等待時間，確保長頁面中的所有卡片都已渲染完成
-            await new Promise(resolve => setTimeout(resolve, 300));
+            // 增加等待時間，確保 69 檔長頁面中的所有卡片都已渲染完成
+            await new Promise(resolve => setTimeout(resolve, 1000));
 
             const canvas = await html2canvas(element, {
                 backgroundColor: '#020617',
-                scale: 1.2, // 降階縮放以節省記憶體並支持超長頁面
+                scale: dynamicScale,
                 useCORS: true,
                 allowTaint: true,
                 scrollX: 0,
@@ -475,21 +486,25 @@ export default function SmartNavigatorPage() {
                     if (clonedElement) {
                         clonedElement.style.height = 'auto';
                         clonedElement.style.overflow = 'visible';
-                        clonedElement.style.paddingBottom = '500px'; // 大幅增加緩衝
+                        clonedElement.style.paddingBottom = '600px'; // 增加緩衝
                         
-                        // 確保所有子容器也展開
-                        const cards = clonedElement.querySelectorAll('.bg-slate-900\\/50');
-                        cards.forEach((card: any) => {
-                            card.style.overflow = 'visible';
-                            card.style.height = 'auto';
+                        // 確保所有子容器也展開，並移除陰影以節省記憶體
+                        const divs = clonedElement.querySelectorAll('div');
+                        divs.forEach((div: any) => {
+                            if (div.style.overflow === 'hidden') div.style.overflow = 'visible';
+                            // 對於超長列表，移除複雜陰影可大幅提高成功率
+                            if (dynamicScale < 1) {
+                                div.style.boxShadow = 'none';
+                                div.style.backdropFilter = 'none';
+                            }
                         });
                     }
                 }
             });
 
             // 檢查畫布是否有效
-            if (canvas.width === 0 || canvas.height === 0) {
-                throw new Error('產生的圖片內容為空，請稍後再試或縮小搜尋範圍。');
+            if (canvas.width === 0 || canvas.height === 0 || (canvas.width === 1 && canvas.height === 1)) {
+                throw new Error('產生的圖片內容為空（瀏覽器畫布超限），請嘗試篩選掉部分不重要的燈號後再下載。');
             }
 
             const link = document.createElement('a');
