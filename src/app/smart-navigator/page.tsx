@@ -451,14 +451,26 @@ export default function SmartNavigatorPage() {
             const html2canvas = (await import('html2canvas')).default;
             const element = document.getElementById('smart-navigator-content');
             if (!element) return;
+            // 使用真實的 scroll 偏移量，確保截圖位置正確
+            const scrollX = window.scrollX || window.pageXOffset || 0;
+            const scrollY = window.scrollY || window.pageYOffset || 0;
+            // 取元素實際完整高度（自動篩選結果可能很長）
+            const fullWidth = Math.max(document.documentElement.scrollWidth, element.scrollWidth);
+            const fullHeight = Math.max(document.documentElement.scrollHeight, element.scrollHeight);
             const canvas = await html2canvas(element, {
                 backgroundColor: '#020617',
                 scale: 2,
                 useCORS: true,
-                scrollX: 0,
-                scrollY: 0,
-                windowWidth: element.scrollWidth,
-                windowHeight: element.scrollHeight,
+                scrollX: -scrollX,
+                scrollY: -scrollY,
+                windowWidth: fullWidth,
+                windowHeight: fullHeight,
+                onclone: (_doc: Document, clonedElement: HTMLElement) => {
+                    // 確保 clone 後的元素可完整展開，不被 overflow 裁切
+                    clonedElement.style.height = 'auto';
+                    clonedElement.style.minHeight = '0';
+                    clonedElement.style.overflow = 'visible';
+                },
             });
             const link = document.createElement('a');
             link.download = `智能選股導航_分析報告_${new Date().toLocaleDateString('zh-TW', { year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/\//g, '')}.png`;
