@@ -464,28 +464,25 @@ export default function SmartNavigatorPage() {
 
             const canvas = await html2canvas(element, {
                 backgroundColor: '#020617',
-                scale: 2,
+                scale: 1.2, // 降階縮放以節省記憶體並支持超長頁面
                 useCORS: true,
                 allowTaint: true,
                 scrollX: 0,
                 scrollY: 0,
                 width: element.scrollWidth,
-                height: element.scrollHeight + 100, // 增加 100px 緩衝確保底部不被切掉
-                windowWidth: element.scrollWidth,
-                windowHeight: element.scrollHeight + 100,
                 onclone: (clonedDoc) => {
                     const clonedElement = clonedDoc.getElementById('smart-navigator-content');
                     if (clonedElement) {
-                        // 強制克隆環境的所有父容器展開，不限制高度與溢出
-                        clonedDoc.documentElement.style.height = 'auto';
-                        clonedDoc.documentElement.style.overflow = 'visible';
-                        clonedDoc.body.style.height = 'auto';
-                        clonedDoc.body.style.overflow = 'visible';
-                        
                         clonedElement.style.height = 'auto';
                         clonedElement.style.overflow = 'visible';
-                        clonedElement.style.maxWidth = 'none'; // 移除寬度限制確保佈局完整
-                        clonedElement.style.paddingBottom = '100px'; // 增加底部內距
+                        clonedElement.style.paddingBottom = '500px'; // 大幅增加緩衝
+                        
+                        // 確保所有子容器也展開
+                        const cards = clonedElement.querySelectorAll('.bg-slate-900\\/50');
+                        cards.forEach((card: any) => {
+                            card.style.overflow = 'visible';
+                            card.style.height = 'auto';
+                        });
                     }
                 }
             });
