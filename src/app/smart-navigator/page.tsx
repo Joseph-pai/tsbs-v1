@@ -457,6 +457,8 @@ export default function SmartNavigatorPage() {
             
             const cards = Array.from(document.querySelectorAll('.stock-result-card'));
             const header = document.querySelector('.text-center.mb-12');
+            const searchPanel = document.getElementById('stock-search-panel');
+            const filterSummary = document.getElementById('stock-filter-summary-container');
             
             if (cards.length === 0) {
                 // 單一股票查詢模式：維持原本的單頁截圖，但鎖定高品質
@@ -482,14 +484,12 @@ export default function SmartNavigatorPage() {
                 link.click();
             } else {
                 // 多檔股票自動篩選模式：採用「分段高品質圖片」方案
-                // 每 15 檔分為一張圖，確保在 scale 2 下依然在 Safari 的畫布極限內
                 const CHUNK_SIZE = 15;
                 
                 for (let i = 0; i < cards.length; i += CHUNK_SIZE) {
                     const chunk = cards.slice(i, i + CHUNK_SIZE);
                     const partIndex = Math.floor(i / CHUNK_SIZE) + 1;
                     
-                    // 建立渲染容器 (隱藏在視窗外)
                     const container = document.createElement('div');
                     container.style.position = 'absolute';
                     container.style.left = '-9999px';
@@ -499,11 +499,29 @@ export default function SmartNavigatorPage() {
                     container.style.backgroundColor = '#020617';
                     container.style.color = 'white';
                     
-                    // 第一段加入報告標頭
-                    if (i === 0 && header) {
-                        const headerClone = header.cloneNode(true) as HTMLElement;
-                        headerClone.style.marginBottom = '40px';
-                        container.appendChild(headerClone);
+                    // 第一段加入：標題 + 搜尋面板 + 篩選統計
+                    if (i === 0) {
+                        if (header) {
+                            const headerClone = header.cloneNode(true) as HTMLElement;
+                            headerClone.style.marginBottom = '40px';
+                            container.appendChild(headerClone);
+                        }
+                        if (searchPanel) {
+                            const searchClone = searchPanel.cloneNode(true) as HTMLElement;
+                            searchClone.style.marginBottom = '40px';
+                            // 移除內部的動態元素或調整樣式以適合截圖
+                            container.appendChild(searchClone);
+                        }
+                        if (filterSummary) {
+                            const summaryClone = filterSummary.cloneNode(true) as HTMLElement;
+                            summaryClone.style.marginBottom = '40px';
+                            // 只保留統計標題與按鈕部分，不要包含下方卡片列表（因為我們會另外加入）
+                            // 這裡透過 querySelector 移除克隆體內的卡片區域
+                            const cardListArea = summaryClone.querySelector('.space-y-12');
+                            if (cardListArea) cardListArea.remove();
+                            
+                            container.appendChild(summaryClone);
+                        }
                     }
                     
                     // 加入該段落的股票卡片
@@ -751,7 +769,7 @@ export default function SmartNavigatorPage() {
                 </div>
 
                 {/* Input Area */}
-                <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 mb-8 shadow-2xl relative overflow-hidden">
+                <div id="stock-search-panel" className="bg-slate-900 border border-slate-800 rounded-3xl p-6 mb-8 shadow-2xl relative overflow-hidden">
                     <div className="flex flex-col md:flex-row flex-wrap gap-4 relative z-10">
                         <input
                             type="text"
@@ -903,7 +921,7 @@ export default function SmartNavigatorPage() {
 
                 {/* Result Area (Auto Filter) */}
                 {showAutoFilter && filterCompleted && (
-                    <div className="animate-in fade-in slide-in-from-bottom-8 duration-700">
+                    <div id="stock-filter-summary-container" className="animate-in fade-in slide-in-from-bottom-8 duration-700">
                         <div className="flex items-center gap-3 mb-6">
                             <div className="h-[1px] flex-1 bg-slate-800"></div>
                             <div className={`font-black tracking-widest text-lg ${filterMode === 'distribution' ? 'text-rose-400' : 'text-indigo-400'}`}>
