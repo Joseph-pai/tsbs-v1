@@ -825,7 +825,7 @@ export default function SmartNavigatorPage() {
                                     )}
                                     
                                     <button
-                                        onClick={handleAutoFilter}
+                                        onClick={() => handleAutoFilter()}
                                         disabled={isFiltering || !selectedDate}
                                         className="w-full mt-4 bg-amber-600 hover:bg-amber-500 disabled:bg-slate-800 disabled:text-slate-500 text-white font-black py-3 rounded-xl transition-all flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(217,119,6,0.3)] disabled:shadow-none"
                                     >
