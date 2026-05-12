@@ -164,7 +164,7 @@ function ResultCard({ result, stockId, stockName, overrideLight, overrideLightTe
     const displayLightText = overrideLightText ?? lightText[result.light as keyof typeof lightText];
 
     return (
-        <div className="animate-in fade-in slide-in-from-bottom-8 duration-700 space-y-6 mb-12">
+        <div className="stock-result-card animate-in fade-in slide-in-from-bottom-8 duration-700 space-y-6 mb-12">
             {/* Stock Title */}
             <div className="flex items-center gap-3 mb-2 flex-wrap">
                 <div className="bg-indigo-500/20 text-indigo-400 px-4 py-2 rounded-xl font-black border border-indigo-500/30 text-xl">
@@ -449,75 +449,103 @@ export default function SmartNavigatorPage() {
         if (isPrinting) return;
         setIsPrinting(true);
         
-        // 記錄當前滾動位置，方便截圖後恢復
         const originalScrollY = window.scrollY;
         
         try {
             const html2canvas = (await import('html2canvas')).default;
-            const element = document.getElementById('smart-navigator-content');
-            if (!element) return;
-
-            // --- 核心優化：動態縮放 (Dynamic Scaling) ---
-            const scrollHeight = element.scrollHeight;
-            const SAFARI_LIMIT = 16000; // Safari/iOS 的畫布高度極限
+            const { jsPDF } = await import('jspdf');
             
-            // 預設 scale 為 2，若高度超過極限則動態調降
-            let dynamicScale = 2; // 提高截圖清晰度預設值至 2 (DPR)，改善放大後的模糊問題
-            if (scrollHeight * dynamicScale > SAFARI_LIMIT) {
-                dynamicScale = Math.max(0.4, SAFARI_LIMIT / scrollHeight); 
-                console.log(`[智能導航] 檢測到超長列表 (${scrollHeight}px)，自動將縮放調整為 ${dynamicScale.toFixed(2)} 以確保下載成功。`);
-            }
-
-            // 先滾動到頂部，這是 html2canvas 處理長頁面最穩定的做法
-            window.scrollTo(0, 0);
+            const cards = Array.from(document.querySelectorAll('.stock-result-card'));
+            const header = document.querySelector('.text-center.mb-12');
             
-            // 增加等待時間，確保 69 檔長頁面中的所有卡片都已渲染完成
-            await new Promise(resolve => setTimeout(resolve, 1000));
+            if (cards.length === 0) {
+                // 單一股票查詢模式：維持原本的單頁截圖，但鎖定高品質
+                const element = document.getElementById('smart-navigator-content');
+                if (!element) return;
 
-            const canvas = await html2canvas(element, {
-                backgroundColor: '#020617',
-                scale: dynamicScale,
-                useCORS: true,
-                allowTaint: true,
-                scrollX: 0,
-                scrollY: 0,
-                width: element.scrollWidth,
-                onclone: (clonedDoc) => {
-                    const clonedElement = clonedDoc.getElementById('smart-navigator-content');
-                    if (clonedElement) {
-                        clonedElement.style.height = 'auto';
-                        clonedElement.style.overflow = 'visible';
-                        clonedElement.style.paddingBottom = '600px'; // 增加緩衝
-                        
-                        // 確保所有子容器也展開，並移除陰影以節省記憶體
-                        const divs = clonedElement.querySelectorAll('div');
-                        divs.forEach((div: any) => {
-                            if (div.style.overflow === 'hidden') div.style.overflow = 'visible';
-                            // 對於超長列表，移除複雜陰影可大幅提高成功率
-                            if (dynamicScale < 1) {
-                                div.style.boxShadow = 'none';
-                                div.style.backdropFilter = 'none';
-                            }
-                        });
+                window.scrollTo(0, 0);
+                await new Promise(resolve => setTimeout(resolve, 500));
+
+                const canvas = await html2canvas(element, {
+                    backgroundColor: '#020617',
+                    scale: 2,
+                    useCORS: true,
+                    allowTaint: true,
+                    scrollX: 0,
+                    scrollY: 0,
+                    width: element.scrollWidth,
+                });
+
+                const link = document.createElement('a');
+                const dateStr = new Date().toLocaleDateString('zh-TW', { year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/\//g, '');
+                link.download = `智能選股導航_分析報告_${dateStr}.png`;
+                link.href = canvas.toDataURL('image/png');
+                link.click();
+            } else {
+                // 多檔股票自動篩選模式：使用 PDF 分頁技術，確保 90 檔股票依然清晰
+                const pdf = new jsPDF('p', 'mm', 'a4');
+                const pdfWidth = pdf.internal.pageSize.getWidth();
+                
+                // 每頁放置 6-8 檔股票以保證每張畫布不會過大
+                const CHUNK_SIZE = 8;
+                
+                for (let i = 0; i < cards.length; i += CHUNK_SIZE) {
+                    const chunk = cards.slice(i, i + CHUNK_SIZE);
+                    
+                    // 建立渲染容器 (隱藏在視窗外)
+                    const container = document.createElement('div');
+                    container.style.position = 'absolute';
+                    container.style.left = '-9999px';
+                    container.style.top = '0';
+                    container.style.width = '800px'; 
+                    container.style.padding = '40px';
+                    container.style.backgroundColor = '#020617';
+                    container.style.color = 'white';
+                    
+                    // 第一頁加入報告標頭
+                    if (i === 0 && header) {
+                        const headerClone = header.cloneNode(true) as HTMLElement;
+                        headerClone.style.marginBottom = '40px';
+                        container.appendChild(headerClone);
                     }
+                    
+                    // 加入該分頁的股票卡片
+                    chunk.forEach(card => {
+                        const clone = card.cloneNode(true) as HTMLElement;
+                        // 移除動畫類名，避免捕捉到半透明狀態
+                        clone.className = clone.className.replace(/animate-in|fade-in|slide-in-from-bottom-8/g, '');
+                        clone.style.opacity = '1';
+                        clone.style.transform = 'none';
+                        clone.style.marginBottom = '40px';
+                        container.appendChild(clone);
+                    });
+                    
+                    document.body.appendChild(container);
+                    
+                    // 高解析度捕捉
+                    const canvas = await html2canvas(container, {
+                        scale: 2,
+                        useCORS: true,
+                        backgroundColor: '#020617',
+                        logging: false,
+                    });
+                    
+                    const imgData = canvas.toDataURL('image/jpeg', 0.95);
+                    const imgHeightMM = (canvas.height * pdfWidth) / canvas.width;
+                    
+                    if (i > 0) pdf.addPage();
+                    pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, imgHeightMM);
+                    
+                    document.body.removeChild(container);
                 }
-            });
-
-            // 檢查畫布是否有效
-            if (canvas.width === 0 || canvas.height === 0 || (canvas.width === 1 && canvas.height === 1)) {
-                throw new Error('產生的圖片內容為空（瀏覽器畫布超限），請嘗試篩選掉部分不重要的燈號後再下載。');
+                
+                const dateStr = new Date().toLocaleDateString('zh-TW', { year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/\//g, '');
+                pdf.save(`智能選股導航_分頁報告_${dateStr}.pdf`);
             }
-
-            const link = document.createElement('a');
-            const dateStr = new Date().toLocaleDateString('zh-TW', { year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/\//g, '');
-            link.download = `智能選股導航_分析報告_${dateStr}.png`;
-            link.href = canvas.toDataURL('image/png');
-            link.click();
         } catch (err: any) {
-            console.error('截圖失敗:', err);
-            alert(err.message || '截圖失敗，請重試');
+            console.error('報告產生失敗:', err);
+            alert(err.message || '報告產生失敗，請重試');
         } finally {
-            // 恢復滾動位置
             window.scrollTo(0, originalScrollY);
             setIsPrinting(false);
         }
