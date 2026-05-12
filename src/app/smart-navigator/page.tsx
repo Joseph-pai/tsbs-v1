@@ -461,8 +461,8 @@ export default function SmartNavigatorPage() {
             const scrollHeight = element.scrollHeight;
             const SAFARI_LIMIT = 16000; // Safari/iOS 的畫布高度極限
             
-            // 預設 scale 為 1.2，若高度超過極限則動態調降
-            let dynamicScale = 1.2;
+            // 預設 scale 為 2，若高度超過極限則動態調降
+            let dynamicScale = 2; // 提高截圖清晰度預設值至 2 (DPR)，改善放大後的模糊問題
             if (scrollHeight * dynamicScale > SAFARI_LIMIT) {
                 dynamicScale = Math.max(0.4, SAFARI_LIMIT / scrollHeight); 
                 console.log(`[智能導航] 檢測到超長列表 (${scrollHeight}px)，自動將縮放調整為 ${dynamicScale.toFixed(2)} 以確保下載成功。`);
