@@ -14,6 +14,9 @@ Modified `handleAutoFilter` to:
 - Support an optional `stocksToRetry` parameter to allow targeting specific stocks for re-screening.
 - Correctly append new results to the list when retrying.
 
+### 4. TypeScript Fix
+Corrected a type mismatch in the `onClick` handler for the screening button. Since `handleAutoFilter` now accepts an optional argument, it was wrapped in an arrow function `() => handleAutoFilter()` to avoid the `MouseEvent` being passed as the argument, which caused a build error in Netlify.
+
 ### 3. User Interface Enhancements
 Added a dynamic alert box that appears after screening if any stocks failed.
 - Displays the count of failed stocks.
