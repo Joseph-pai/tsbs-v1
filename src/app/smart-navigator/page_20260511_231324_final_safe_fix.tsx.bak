@@ -440,7 +440,6 @@ export default function SmartNavigatorPage() {
     const [filterMode, setFilterMode] = useState<'green' | 'distribution'>('green');
     const [lightFilter, setLightFilter] = useState<'all' | 'green' | 'yellow'>('all');
     const [distributionFilter, setDistributionFilter] = useState<'all' | 'alert' | 'warning' | 'watch' | 'safe'>('all');
-    const [failedStocks, setFailedStocks] = useState<Array<{id: string, name: string}>>([]);
 
     // Print State
     const [isPrinting, setIsPrinting] = useState(false);
@@ -457,26 +456,15 @@ export default function SmartNavigatorPage() {
             const element = document.getElementById('smart-navigator-content');
             if (!element) return;
 
-            // --- 核心優化：動態縮放 (Dynamic Scaling) ---
-            const scrollHeight = element.scrollHeight;
-            const SAFARI_LIMIT = 16000; // Safari/iOS 的畫布高度極限
-            
-            // 預設 scale 為 1.2，若高度超過極限則動態調降
-            let dynamicScale = 1.2;
-            if (scrollHeight * dynamicScale > SAFARI_LIMIT) {
-                dynamicScale = Math.max(0.4, SAFARI_LIMIT / scrollHeight); 
-                console.log(`[智能導航] 檢測到超長列表 (${scrollHeight}px)，自動將縮放調整為 ${dynamicScale.toFixed(2)} 以確保下載成功。`);
-            }
-
             // 先滾動到頂部，這是 html2canvas 處理長頁面最穩定的做法
             window.scrollTo(0, 0);
             
-            // 增加等待時間，確保 69 檔長頁面中的所有卡片都已渲染完成
-            await new Promise(resolve => setTimeout(resolve, 1000));
+            // 增加等待時間，確保長頁面中的所有卡片都已渲染完成
+            await new Promise(resolve => setTimeout(resolve, 300));
 
             const canvas = await html2canvas(element, {
                 backgroundColor: '#020617',
-                scale: dynamicScale,
+                scale: 1.2, // 降階縮放以節省記憶體並支持超長頁面
                 useCORS: true,
                 allowTaint: true,
                 scrollX: 0,
@@ -487,25 +475,21 @@ export default function SmartNavigatorPage() {
                     if (clonedElement) {
                         clonedElement.style.height = 'auto';
                         clonedElement.style.overflow = 'visible';
-                        clonedElement.style.paddingBottom = '600px'; // 增加緩衝
+                        clonedElement.style.paddingBottom = '500px'; // 大幅增加緩衝
                         
-                        // 確保所有子容器也展開，並移除陰影以節省記憶體
-                        const divs = clonedElement.querySelectorAll('div');
-                        divs.forEach((div: any) => {
-                            if (div.style.overflow === 'hidden') div.style.overflow = 'visible';
-                            // 對於超長列表，移除複雜陰影可大幅提高成功率
-                            if (dynamicScale < 1) {
-                                div.style.boxShadow = 'none';
-                                div.style.backdropFilter = 'none';
-                            }
+                        // 確保所有子容器也展開
+                        const cards = clonedElement.querySelectorAll('.bg-slate-900\\/50');
+                        cards.forEach((card: any) => {
+                            card.style.overflow = 'visible';
+                            card.style.height = 'auto';
                         });
                     }
                 }
             });
 
             // 檢查畫布是否有效
-            if (canvas.width === 0 || canvas.height === 0 || (canvas.width === 1 && canvas.height === 1)) {
-                throw new Error('產生的圖片內容為空（瀏覽器畫布超限），請嘗試篩選掉部分不重要的燈號後再下載。');
+            if (canvas.width === 0 || canvas.height === 0) {
+                throw new Error('產生的圖片內容為空，請稍後再試或縮小搜尋範圍。');
             }
 
             const link = document.createElement('a');
@@ -569,42 +553,31 @@ export default function SmartNavigatorPage() {
         }
     };
 
-    const handleAutoFilter = async (stocksToRetry?: Array<{id: string, name: string}>) => {
-        if (!selectedDate && !stocksToRetry) return;
+    const handleAutoFilter = async () => {
+        if (!selectedDate) return;
         setIsFiltering(true);
         setError(null);
+        setFilterResults([]);
         setFilterCompleted(false);
         setResult(null);
 
-        // If not retrying, reset everything. If retrying, we append to existing results.
-        if (!stocksToRetry) {
-            setFilterResults([]);
-            setFailedStocks([]);
-        }
-
         try {
-            let uniqueStocks: Array<{id: string, name: string}> = [];
+            // Find all stocks scanned on the selected date
+            const targetRecords = scanRecords.filter(r => {
+                if (!r.createdAt?.seconds) return false;
+                return format(new Date(r.createdAt.seconds * 1000), 'yyyy-MM-dd') === selectedDate;
+            });
 
-            if (stocksToRetry) {
-                uniqueStocks = stocksToRetry;
-            } else {
-                // Find all stocks scanned on the selected date
-                const targetRecords = scanRecords.filter(r => {
-                    if (!r.createdAt?.seconds) return false;
-                    return format(new Date(r.createdAt.seconds * 1000), 'yyyy-MM-dd') === selectedDate;
+            // Extract unique stocks
+            const stockMap = new Map<string, string>(); // stockId -> stockName
+            targetRecords.forEach(r => {
+                const items = r.data || r.results || [];
+                items.forEach((item: any) => {
+                    if (item.stock_id) stockMap.set(item.stock_id, item.stock_name || '');
                 });
+            });
 
-                // Extract unique stocks
-                const stockMap = new Map<string, string>(); // stockId -> stockName
-                targetRecords.forEach(r => {
-                    const items = r.data || r.results || [];
-                    items.forEach((item: any) => {
-                        if (item.stock_id) stockMap.set(item.stock_id, item.stock_name || '');
-                    });
-                });
-
-                uniqueStocks = Array.from(stockMap.entries()).map(([id, name]) => ({ id, name }));
-            }
+            const uniqueStocks = Array.from(stockMap.entries()).map(([id, name]) => ({ id, name }));
 
             if (uniqueStocks.length === 0) {
                 setFilterCompleted(true);
@@ -613,8 +586,8 @@ export default function SmartNavigatorPage() {
             }
 
             const BATCH_SIZE = 5;
-            const newValidResults: any[] = [];
-            const currentlyFailed: Array<{id: string, name: string}> = [];
+            const validResults: any[] = [];
+            const maxPosPercent = parseInt(maxPosition, 10);
             const levelOrder: Record<string, number> = { alert: 0, warning: 1, watch: 2, safe: 3 };
 
             for (let i = 0; i < uniqueStocks.length; i += BATCH_SIZE) {
@@ -635,53 +608,33 @@ export default function SmartNavigatorPage() {
                                 if ((json.data.light === 'green' || json.data.light === 'yellow') && json.data.signalTag !== null) {
                                     return { stockId: stock.id, stockName: stock.name, data: json.data, distributionLevel: json.data.distribution?.level };
                                 }
-                                return { skip: true }; // Marker for successful fetch but doesn't meet criteria
                             } else {
                                 // 出貨預警：顯示所有股票（含 safe），讓用戶看到安全與危險的對比
                                 if (json.data.distribution) {
                                     return { stockId: stock.id, stockName: stock.name, data: json.data, distributionLevel: json.data.distribution.level };
                                 }
-                                return { skip: true };
                             }
-                        } else {
-                            currentlyFailed.push(stock);
                         }
                     } catch (e) {
                         console.error(`Failed to analyze ${stock.id}`, e);
-                        currentlyFailed.push(stock);
                     }
                     return null;
                 });
 
                 const resolved = await Promise.all(batchPromises);
-                newValidResults.push(...resolved.filter(r => r !== null && !r.skip));
+                validResults.push(...resolved.filter(r => r !== null));
             }
-
-            // Update failed stocks state
-            if (stocksToRetry) {
-                // If we were retrying, filter out the ones that succeeded this time
-                const succeededIds = new Set(newValidResults.map(r => r.stockId));
-                setFailedStocks(prev => prev.filter(s => !succeededIds.has(s.id)));
-                // Also add any that failed again in this batch (though they should already be in prev)
-                // Actually, currentlyFailed has the ones that failed in THIS batch.
-                // Since batch is from stocksToRetry, these are already in failedStocks.
-            } else {
-                setFailedStocks(currentlyFailed);
-            }
-
-            // Update results
-            const combinedResults = stocksToRetry ? [...filterResults, ...newValidResults] : newValidResults;
 
             if (filterMode === 'distribution') {
-                combinedResults.sort((a, b) => (levelOrder[a.distributionLevel] ?? 4) - (levelOrder[b.distributionLevel] ?? 4));
+                validResults.sort((a, b) => (levelOrder[a.distributionLevel] ?? 4) - (levelOrder[b.distributionLevel] ?? 4));
             }
             if (filterMode === 'green') {
                 const lightOrder: Record<string, number> = { green: 0, yellow: 1, red: 2 };
-                combinedResults.sort((a, b) => (lightOrder[a.data.light] ?? 1) - (lightOrder[b.data.light] ?? 1));
+                validResults.sort((a, b) => (lightOrder[a.data.light] ?? 1) - (lightOrder[b.data.light] ?? 1));
             }
 
             setFilterProgress({ current: uniqueStocks.length, total: uniqueStocks.length, phase: '分析完成' });
-            setFilterResults(combinedResults as any);
+            setFilterResults(validResults as any);
             setFilterCompleted(true);
 
         } catch (e: any) {
@@ -888,31 +841,6 @@ export default function SmartNavigatorPage() {
                             </div>
                             <div className="h-[1px] flex-1 bg-slate-800"></div>
                         </div>
-
-                        {/* Failed Stocks Warning & Retry */}
-                        {failedStocks.length > 0 && (
-                            <div className="mb-8 p-6 rounded-3xl bg-amber-500/5 border border-amber-500/20 animate-in slide-in-from-top-4 duration-500">
-                                <div className="flex items-start gap-4">
-                                    <div className="w-12 h-12 rounded-2xl bg-amber-500/10 flex items-center justify-center flex-shrink-0">
-                                        <AlertTriangle className="w-6 h-6 text-amber-500" />
-                                    </div>
-                                    <div className="flex-1">
-                                        <h3 className="text-lg font-black text-amber-400 mb-1">部分數據獲取失敗</h3>
-                                        <p className="text-slate-400 text-sm leading-relaxed mb-4">
-                                            本次篩選中有 {failedStocks.length} 檔股票無法獲取即時市場數據。這可能是由於交易所網路波動或代號異常。
-                                        </p>
-                                        <button
-                                            onClick={() => handleAutoFilter(failedStocks)}
-                                            disabled={isFiltering}
-                                            className="px-6 py-2.5 bg-amber-500 hover:bg-amber-400 disabled:bg-slate-800 disabled:text-slate-500 text-black font-black rounded-xl text-sm transition-all flex items-center gap-2"
-                                        >
-                                            {isFiltering ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4 fill-current" />}
-                                            針對這些股票再次篩選
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-                        )}
 
                         {/* 主力進場模式：燈號顏色過濾器 */}
                         {filterMode === 'green' && filterResults.length > 0 && (
