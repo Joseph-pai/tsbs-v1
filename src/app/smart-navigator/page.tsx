@@ -450,10 +450,10 @@ export default function SmartNavigatorPage() {
         setIsPrinting(true);
         
         const originalScrollY = window.scrollY;
+        const dateStr = new Date().toLocaleDateString('zh-TW', { year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/\//g, '');
         
         try {
             const html2canvas = (await import('html2canvas')).default;
-            const { jsPDF } = await import('jspdf');
             
             const cards = Array.from(document.querySelectorAll('.stock-result-card'));
             const header = document.querySelector('.text-center.mb-12');
@@ -477,20 +477,17 @@ export default function SmartNavigatorPage() {
                 });
 
                 const link = document.createElement('a');
-                const dateStr = new Date().toLocaleDateString('zh-TW', { year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/\//g, '');
-                link.download = `智能選股導航_分析報告_${dateStr}.png`;
+                link.download = `智能選股報告_${dateStr}.png`;
                 link.href = canvas.toDataURL('image/png');
                 link.click();
             } else {
-                // 多檔股票自動篩選模式：使用 PDF 分頁技術，確保 90 檔股票依然清晰
-                const pdf = new jsPDF('p', 'mm', 'a4');
-                const pdfWidth = pdf.internal.pageSize.getWidth();
-                
-                // 每頁放置 6-8 檔股票以保證每張畫布不會過大
-                const CHUNK_SIZE = 8;
+                // 多檔股票自動篩選模式：採用「分段高品質圖片」方案
+                // 每 15 檔分為一張圖，確保在 scale 2 下依然在 Safari 的畫布極限內
+                const CHUNK_SIZE = 15;
                 
                 for (let i = 0; i < cards.length; i += CHUNK_SIZE) {
                     const chunk = cards.slice(i, i + CHUNK_SIZE);
+                    const partIndex = Math.floor(i / CHUNK_SIZE) + 1;
                     
                     // 建立渲染容器 (隱藏在視窗外)
                     const container = document.createElement('div');
@@ -502,17 +499,17 @@ export default function SmartNavigatorPage() {
                     container.style.backgroundColor = '#020617';
                     container.style.color = 'white';
                     
-                    // 第一頁加入報告標頭
+                    // 第一段加入報告標頭
                     if (i === 0 && header) {
                         const headerClone = header.cloneNode(true) as HTMLElement;
                         headerClone.style.marginBottom = '40px';
                         container.appendChild(headerClone);
                     }
                     
-                    // 加入該分頁的股票卡片
+                    // 加入該段落的股票卡片
                     chunk.forEach(card => {
                         const clone = card.cloneNode(true) as HTMLElement;
-                        // 移除動畫類名，避免捕捉到半透明狀態
+                        // 移除動畫類名與初始透明度，確保截圖完整
                         clone.className = clone.className.replace(/animate-in|fade-in|slide-in-from-bottom-8/g, '');
                         clone.style.opacity = '1';
                         clone.style.transform = 'none';
@@ -522,7 +519,7 @@ export default function SmartNavigatorPage() {
                     
                     document.body.appendChild(container);
                     
-                    // 高解析度捕捉
+                    // 高解析度捕捉 (固定 scale: 2)
                     const canvas = await html2canvas(container, {
                         scale: 2,
                         useCORS: true,
@@ -530,17 +527,18 @@ export default function SmartNavigatorPage() {
                         logging: false,
                     });
                     
-                    const imgData = canvas.toDataURL('image/jpeg', 0.95);
-                    const imgHeightMM = (canvas.height * pdfWidth) / canvas.width;
-                    
-                    if (i > 0) pdf.addPage();
-                    pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, imgHeightMM);
+                    const link = document.createElement('a');
+                    link.download = `智能選股報告_${dateStr}_Part${partIndex}.png`;
+                    link.href = canvas.toDataURL('image/png');
+                    link.click();
                     
                     document.body.removeChild(container);
+                    
+                    // 稍微延遲，避免瀏覽器同時觸發太多下載
+                    if (cards.length > CHUNK_SIZE) {
+                        await new Promise(r => setTimeout(r, 600));
+                    }
                 }
-                
-                const dateStr = new Date().toLocaleDateString('zh-TW', { year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/\//g, '');
-                pdf.save(`智能選股導航_分頁報告_${dateStr}.pdf`);
             }
         } catch (err: any) {
             console.error('報告產生失敗:', err);
