@@ -503,21 +503,30 @@ export default function SmartNavigatorPage() {
                     if (i === 0) {
                         if (header) {
                             const headerClone = header.cloneNode(true) as HTMLElement;
+                            headerClone.className = headerClone.className.replace(/animate-in|fade-in|slide-in-from-bottom-8|slide-in-from-top-8|duration-\d+/g, '');
+                            headerClone.style.opacity = '1';
+                            headerClone.style.transform = 'none';
                             headerClone.style.marginBottom = '40px';
                             container.appendChild(headerClone);
                         }
                         if (searchPanel) {
                             const searchClone = searchPanel.cloneNode(true) as HTMLElement;
+                            searchClone.className = searchClone.className.replace(/animate-in|fade-in|slide-in-from-bottom-8|slide-in-from-top-8|duration-\d+/g, '');
+                            searchClone.style.opacity = '1';
+                            searchClone.style.transform = 'none';
                             searchClone.style.marginBottom = '40px';
-                            // 移除內部的動態元素或調整樣式以適合截圖
                             container.appendChild(searchClone);
                         }
                         if (filterSummary) {
                             const summaryClone = filterSummary.cloneNode(true) as HTMLElement;
+                            summaryClone.className = summaryClone.className.replace(/animate-in|fade-in|slide-in-from-bottom-8|slide-in-from-top-8|duration-\d+/g, '');
+                            summaryClone.style.opacity = '1';
+                            summaryClone.style.transform = 'none';
                             summaryClone.style.marginBottom = '40px';
-                            // 只保留統計標題與按鈕部分，不要包含下方卡片列表（因為我們會另外加入）
-                            // 這裡透過 querySelector 移除克隆體內的卡片區域
-                            const cardListArea = summaryClone.querySelector('.space-y-12');
+                            
+                            // 修正：使用 .space-y-4 (實際的列表容器類名) 移除克隆體內的卡片區域
+                            // 避免 Part 1 包含全部 90+ 檔股票導致畫布超限
+                            const cardListArea = summaryClone.querySelector('.space-y-4');
                             if (cardListArea) cardListArea.remove();
                             
                             container.appendChild(summaryClone);
@@ -536,6 +545,9 @@ export default function SmartNavigatorPage() {
                     });
                     
                     document.body.appendChild(container);
+                    
+                    // 加入微小延遲確保瀏覽器完成排版 (Layout)
+                    await new Promise(resolve => setTimeout(resolve, 100));
                     
                     // 高解析度捕捉 (固定 scale: 2)
                     const canvas = await html2canvas(container, {
