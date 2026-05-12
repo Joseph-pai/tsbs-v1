@@ -14,23 +14,19 @@ export async function GET(request: Request) {
             return NextResponse.json({ success: false, error: 'Missing stockId' }, { status: 400 });
         }
 
-        // Parallelize all external data fetching
-        const [prices, _, totalShares, taiexHistory] = await Promise.all([
-            ExchangeClient.getStockHistory(stockId, 6),
-            ExchangeClient.getIndustryMapping().catch(() => ({})),
-            getTotalShares(stockId).catch(() => 0),
-            ExchangeClient.getTaiexHistory(1).catch(() => [])
-        ]);
+        // Fetch 6 months of data directly from Exchange to avoid FinMind API limits
+        const prices = await ExchangeClient.getStockHistory(stockId, 6);
 
         if (!prices || prices.length === 0) {
             return NextResponse.json({ success: false, error: '無法獲取該股票的歷史交易數據，請確認代號是否正確。' }, { status: 404 });
         }
 
-        // Fetch stock name from cache (populated by getIndustryMapping above)
-        const stockName = ExchangeClient.getStockName(stockId) || stockId;
-
         // Extract close prices and volumes (ordered from oldest to newest)
         const closePrices = prices.map(p => p.close);
+        // Convert Volume back to shares (ExchangeClient returns volume in thousands (張), except TPEx History API sometimes returns shares. 
+        // Wait, ExchangeClient normalizes volume to "thousands (張)" for TWSE, but let's check its logic: 
+        // TWSE daily: `parseNum(row[1]) / 1000`
+        // TPEx daily: `parseNum(row[1])` (Wait, TPEx history returns volume in thousands (仟股)? Yes, `parseNum(row[1])` means thousands. So both are in thousands. We need to multiply by 1000 to get shares).
         const volumesInShares = prices.map(p => p.Trading_Volume * 1000);
 
         const latestData = prices[prices.length - 1];
@@ -38,6 +34,16 @@ export async function GET(request: Request) {
         const latestHigh = latestData.max;
         const latestLow = latestData.min;
         const latestVolumeShares = latestData.Trading_Volume * 1000;
+
+        // Fetch stock name (cached after first call per server instance)
+        let stockName = stockId;
+        try {
+            await ExchangeClient.getIndustryMapping(); // populates _stockNameCache
+            stockName = ExchangeClient.getStockName(stockId) || stockId;
+        } catch (_) { /* fallback to stockId if name lookup fails */ }
+
+        // Fetch Total Outstanding Shares
+        const totalShares = await getTotalShares(stockId);
         
         // Calculate Real Turnover Rate (%)
         let turnoverRate = 0;
@@ -151,6 +157,7 @@ export async function GET(request: Request) {
         // 【強化6】大盤相對強弱 (Relative Strength)
         let isRelativeStrengthHigh = false;
         try {
+            const taiexHistory = await ExchangeClient.getTaiexHistory(1);
             if (taiexHistory.length >= 6 && prices.length >= 6) {
                 const recentPrices = prices.slice(-6);
                 let rsPositiveDays = 0;

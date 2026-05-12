@@ -173,8 +173,7 @@ export const ExchangeClient = {
             const monthsToFetch = months; // Increased from 3 to support 'All History' backtesting
             const allData: StockData[] = [];
 
-            const monthsArray = Array.from({ length: monthsToFetch }, (_, i) => i);
-            const results = await Promise.all(monthsArray.map(async (i) => {
+            for (let i = 0; i < monthsToFetch; i++) {
                 try {
                     const targetDate = subMonths(new Date(), i);
                     let monthlyData: StockData[] = [];
@@ -201,7 +200,7 @@ export const ExchangeClient = {
                             }));
                         }
                     } else {
-                        // TPEx Logic
+                        // TPEX Logic
                         const rocYearMonth = `${targetDate.getFullYear() - 1911}/${format(targetDate, 'MM')}`;
                         const url = `https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/stk_quote_result.php?l=zh-tw&d=${rocYearMonth}&stkno=${stockId}`;
                         const res = await axios.get(url, { timeout: 10000 });
@@ -222,14 +221,11 @@ export const ExchangeClient = {
                             }));
                         }
                     }
-                    return monthlyData;
+                    allData.push(...monthlyData);
                 } catch (e) {
                     console.warn(`[Exchange] Failed to fetch month ${i} for ${stockId}, skipping...`);
-                    return [];
                 }
-            }));
-
-            results.forEach(month => allData.push(...month));
+            }
 
             // Deduplicate, sort by date ascending
             const unique = Array.from(new Map(allData.map(item => [item.date, item])).values());
@@ -247,8 +243,7 @@ export const ExchangeClient = {
     getTaiexHistory: async (months: number = 1): Promise<{ date: string, close: number, spread: number }[]> => {
         try {
             const allData: { date: string, close: number, spread: number }[] = [];
-            const monthsArray = Array.from({ length: months }, (_, i) => i);
-            const results = await Promise.all(monthsArray.map(async (i) => {
+            for (let i = 0; i < months; i++) {
                 try {
                     const targetDate = subMonths(new Date(), i);
                     const dateStr = format(targetDate, 'yyyyMM01');
@@ -257,19 +252,17 @@ export const ExchangeClient = {
                     
                     if (res.data && res.data.data) {
                         const parseNum = (val: string) => parseFloat(val.replace(/,/g, ''));
-                        return res.data.data.map((row: any[]) => ({
+                        const monthlyData = res.data.data.map((row: any[]) => ({
                             date: normalizeAnyDate(row[0]),
                             close: parseNum(row[4]),
                             spread: parseNum(row[5])
                         }));
+                        allData.push(...monthlyData);
                     }
                 } catch (e) {
                     console.warn(`[Exchange] Failed to fetch TAIEX month ${i}, skipping...`);
                 }
-                return [];
-            }));
-            
-            results.forEach(month => allData.push(...month));
+            }
             
             // Deduplicate, sort by date ascending
             const unique = Array.from(new Map(allData.map(item => [item.date, item])).values());
