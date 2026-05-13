@@ -164,7 +164,7 @@ function ResultCard({ result, stockId, stockName, overrideLight, overrideLightTe
     const displayLightText = overrideLightText ?? lightText[result.light as keyof typeof lightText];
 
     return (
-        <div className="stock-result-card animate-in fade-in slide-in-from-bottom-8 duration-700 space-y-6 mb-12">
+        <div className="animate-in fade-in slide-in-from-bottom-8 duration-700 space-y-6 mb-12">
             {/* Stock Title */}
             <div className="flex items-center gap-3 mb-2 flex-wrap">
                 <div className="bg-indigo-500/20 text-indigo-400 px-4 py-2 rounded-xl font-black border border-indigo-500/30 text-xl">
@@ -444,263 +444,82 @@ export default function SmartNavigatorPage() {
 
     // Print State
     const [isPrinting, setIsPrinting] = useState(false);
-    const [isExportingPDF, setIsExportingPDF] = useState(false);
 
     const handleDownload = async () => {
         if (isPrinting) return;
         setIsPrinting(true);
         
+        // 記錄當前滾動位置，方便截圖後恢復
         const originalScrollY = window.scrollY;
-        const dateStr = new Date().toLocaleDateString('zh-TW', { year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/\//g, '');
         
         try {
             const html2canvas = (await import('html2canvas')).default;
+            const element = document.getElementById('smart-navigator-content');
+            if (!element) return;
+
+            // --- 核心優化：動態縮放 (Dynamic Scaling) ---
+            const scrollHeight = element.scrollHeight;
+            const SAFARI_LIMIT = 16000; // Safari/iOS 的畫布高度極限
             
-            const cards = Array.from(document.querySelectorAll('.stock-result-card'));
-            const header = document.querySelector('.text-center.mb-12');
-            const searchPanel = document.getElementById('stock-search-panel');
-            const filterSummary = document.getElementById('stock-filter-summary-container');
+            // 預設 scale 為 1.2，若高度超過極限則動態調降
+            let dynamicScale = 1.2;
+            if (scrollHeight * dynamicScale > SAFARI_LIMIT) {
+                dynamicScale = Math.max(0.4, SAFARI_LIMIT / scrollHeight); 
+                console.log(`[智能導航] 檢測到超長列表 (${scrollHeight}px)，自動將縮放調整為 ${dynamicScale.toFixed(2)} 以確保下載成功。`);
+            }
+
+            // 先滾動到頂部，這是 html2canvas 處理長頁面最穩定的做法
+            window.scrollTo(0, 0);
             
-            if (cards.length === 0) {
-                // 單一股票查詢模式：維持原本的單頁截圖，但鎖定高品質
-                const element = document.getElementById('smart-navigator-content');
-                if (!element) return;
+            // 增加等待時間，確保 69 檔長頁面中的所有卡片都已渲染完成
+            await new Promise(resolve => setTimeout(resolve, 1000));
 
-                window.scrollTo(0, 0);
-                await new Promise(resolve => setTimeout(resolve, 500));
-
-                const canvas = await html2canvas(element, {
-                    backgroundColor: '#020617',
-                    scale: 2,
-                    useCORS: true,
-                    allowTaint: true,
-                    scrollX: 0,
-                    scrollY: 0,
-                    width: element.scrollWidth,
-                });
-
-                const link = document.createElement('a');
-                link.download = `智能選股報告_${dateStr}.png`;
-                link.href = canvas.toDataURL('image/png');
-                link.click();
-            } else {
-                // 多檔股票自動篩選模式：採用「分段高品質圖片」方案
-                const CHUNK_SIZE = 15;
-                
-                for (let i = 0; i < cards.length; i += CHUNK_SIZE) {
-                    const chunk = cards.slice(i, i + CHUNK_SIZE);
-                    const partIndex = Math.floor(i / CHUNK_SIZE) + 1;
-                    
-                    const container = document.createElement('div');
-                    container.style.position = 'absolute';
-                    container.style.left = '-9999px';
-                    container.style.top = '0';
-                    container.style.width = '800px'; 
-                    container.style.padding = '40px';
-                    container.style.backgroundColor = '#020617';
-                    container.style.color = 'white';
-                    
-                    // 第一段加入：標題 + 搜尋面板 + 篩選統計
-                    if (i === 0) {
-                        if (header) {
-                            const headerClone = header.cloneNode(true) as HTMLElement;
-                            headerClone.className = headerClone.className.replace(/animate-in|fade-in|slide-in-from-bottom-8|slide-in-from-top-8|duration-\d+/g, '');
-                            headerClone.style.opacity = '1';
-                            headerClone.style.transform = 'none';
-                            headerClone.style.marginBottom = '40px';
-                            container.appendChild(headerClone);
-                        }
-                        if (searchPanel) {
-                            const searchClone = searchPanel.cloneNode(true) as HTMLElement;
-                            searchClone.className = searchClone.className.replace(/animate-in|fade-in|slide-in-from-bottom-8|slide-in-from-top-8|duration-\d+/g, '');
-                            searchClone.style.opacity = '1';
-                            searchClone.style.transform = 'none';
-                            searchClone.style.marginBottom = '40px';
-                            container.appendChild(searchClone);
-                        }
-                        if (filterSummary) {
-                            const summaryClone = filterSummary.cloneNode(true) as HTMLElement;
-                            summaryClone.className = summaryClone.className.replace(/animate-in|fade-in|slide-in-from-bottom-8|slide-in-from-top-8|duration-\d+/g, '');
-                            summaryClone.style.opacity = '1';
-                            summaryClone.style.transform = 'none';
-                            summaryClone.style.marginBottom = '40px';
-                            
-                            // 修正：使用 .space-y-4 (實際的列表容器類名) 移除克隆體內的卡片區域
-                            // 避免 Part 1 包含全部 90+ 檔股票導致畫布超限
-                            const cardListArea = summaryClone.querySelector('.space-y-4');
-                            if (cardListArea) cardListArea.remove();
-                            
-                            container.appendChild(summaryClone);
-                        }
-                    }
-                    
-                    // 加入該段落的股票卡片
-                    chunk.forEach(card => {
-                        const clone = card.cloneNode(true) as HTMLElement;
-                        // 移除動畫類名與初始透明度，確保截圖完整
-                        clone.className = clone.className.replace(/animate-in|fade-in|slide-in-from-bottom-8/g, '');
-                        clone.style.opacity = '1';
-                        clone.style.transform = 'none';
-                        clone.style.marginBottom = '40px';
-                        container.appendChild(clone);
-                    });
-                    
-                    document.body.appendChild(container);
-                    
-                    // 加入微小延遲確保瀏覽器完成排版 (Layout)
-                    await new Promise(resolve => setTimeout(resolve, 100));
-                    
-                    // 高解析度捕捉 (固定 scale: 2)
-                    const canvas = await html2canvas(container, {
-                        scale: 2,
-                        useCORS: true,
-                        backgroundColor: '#020617',
-                        logging: false,
-                    });
-                    
-                    const link = document.createElement('a');
-                    link.download = `智能選股報告_${dateStr}_Part${partIndex}.png`;
-                    link.href = canvas.toDataURL('image/png');
-                    link.click();
-                    
-                    document.body.removeChild(container);
-                    
-                    // 稍微延遲，避免瀏覽器同時觸發太多下載
-                    if (cards.length > CHUNK_SIZE) {
-                        await new Promise(r => setTimeout(r, 600));
+            const canvas = await html2canvas(element, {
+                backgroundColor: '#020617',
+                scale: dynamicScale,
+                useCORS: true,
+                allowTaint: true,
+                scrollX: 0,
+                scrollY: 0,
+                width: element.scrollWidth,
+                onclone: (clonedDoc) => {
+                    const clonedElement = clonedDoc.getElementById('smart-navigator-content');
+                    if (clonedElement) {
+                        clonedElement.style.height = 'auto';
+                        clonedElement.style.overflow = 'visible';
+                        clonedElement.style.paddingBottom = '600px'; // 增加緩衝
+                        
+                        // 確保所有子容器也展開，並移除陰影以節省記憶體
+                        const divs = clonedElement.querySelectorAll('div');
+                        divs.forEach((div: any) => {
+                            if (div.style.overflow === 'hidden') div.style.overflow = 'visible';
+                            // 對於超長列表，移除複雜陰影可大幅提高成功率
+                            if (dynamicScale < 1) {
+                                div.style.boxShadow = 'none';
+                                div.style.backdropFilter = 'none';
+                            }
+                        });
                     }
                 }
+            });
+
+            // 檢查畫布是否有效
+            if (canvas.width === 0 || canvas.height === 0 || (canvas.width === 1 && canvas.height === 1)) {
+                throw new Error('產生的圖片內容為空（瀏覽器畫布超限），請嘗試篩選掉部分不重要的燈號後再下載。');
             }
+
+            const link = document.createElement('a');
+            const dateStr = new Date().toLocaleDateString('zh-TW', { year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/\//g, '');
+            link.download = `智能選股導航_分析報告_${dateStr}.png`;
+            link.href = canvas.toDataURL('image/png');
+            link.click();
         } catch (err: any) {
-            console.error('報告產生失敗:', err);
-            alert(err.message || '報告產生失敗，請重試');
+            console.error('截圖失敗:', err);
+            alert(err.message || '截圖失敗，請重試');
         } finally {
+            // 恢復滾動位置
             window.scrollTo(0, originalScrollY);
             setIsPrinting(false);
-        }
-    };
-
-    const handleDownloadPDF = async () => {
-        if (isExportingPDF) return;
-        setIsExportingPDF(true);
-        
-        const originalScrollY = window.scrollY;
-        const dateStr = new Date().toLocaleDateString('zh-TW', { year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/\//g, '');
-        
-        try {
-            const html2canvas = (await import('html2canvas')).default;
-            const { jsPDF } = await import('jspdf');
-            
-            const cards = Array.from(document.querySelectorAll('.stock-result-card'));
-            const header = document.querySelector('.text-center.mb-12');
-            const searchPanel = document.getElementById('stock-search-panel');
-            const filterSummary = document.getElementById('stock-filter-summary-container');
-            
-            // Initialize PDF
-            const pdf = new jsPDF('p', 'mm', 'a4');
-            const pdfWidth = pdf.internal.pageSize.getWidth();
-            const pdfPageHeight = pdf.internal.pageSize.getHeight();
-            let isFirstPage = true;
-
-            const captureAndAddToPDF = async (element: HTMLElement) => {
-                const canvas = await html2canvas(element, {
-                    scale: 2,
-                    useCORS: true,
-                    backgroundColor: '#020617',
-                    logging: false,
-                });
-                
-                const imgData = canvas.toDataURL('image/jpeg', 0.95);
-                const imgHeightMM = (canvas.height * pdfWidth) / canvas.width;
-                
-                let heightLeft = imgHeightMM;
-                let position = 0;
-
-                while (heightLeft > 0) {
-                    if (!isFirstPage) {
-                        pdf.addPage();
-                    }
-                    pdf.addImage(imgData, 'JPEG', 0, position, pdfWidth, imgHeightMM);
-                    heightLeft -= pdfPageHeight;
-                    position -= pdfPageHeight;
-                    isFirstPage = false;
-                }
-            };
-
-            if (cards.length === 0) {
-                // 單一股票查詢模式
-                const element = document.getElementById('smart-navigator-content');
-                if (!element) return;
-                window.scrollTo(0, 0);
-                await new Promise(resolve => setTimeout(resolve, 500));
-                await captureAndAddToPDF(element);
-            } else {
-                // 多檔股票自動篩選模式
-                const CHUNK_SIZE = 15;
-                for (let i = 0; i < cards.length; i += CHUNK_SIZE) {
-                    const chunk = cards.slice(i, i + CHUNK_SIZE);
-                    const container = document.createElement('div');
-                    container.style.position = 'absolute';
-                    container.style.left = '-9999px';
-                    container.style.top = '0';
-                    container.style.width = '800px'; 
-                    container.style.padding = '40px';
-                    container.style.backgroundColor = '#020617';
-                    container.style.color = 'white';
-                    
-                    if (i === 0) {
-                        if (header) {
-                            const headerClone = header.cloneNode(true) as HTMLElement;
-                            headerClone.className = headerClone.className.replace(/animate-in|fade-in|slide-in-from-bottom-8|slide-in-from-top-8|duration-\d+/g, '');
-                            headerClone.style.opacity = '1';
-                            headerClone.style.transform = 'none';
-                            headerClone.style.marginBottom = '40px';
-                            container.appendChild(headerClone);
-                        }
-                        if (searchPanel) {
-                            const searchClone = searchPanel.cloneNode(true) as HTMLElement;
-                            searchClone.className = searchClone.className.replace(/animate-in|fade-in|slide-in-from-bottom-8|slide-in-from-top-8|duration-\d+/g, '');
-                            searchClone.style.opacity = '1';
-                            searchClone.style.transform = 'none';
-                            searchClone.style.marginBottom = '40px';
-                            container.appendChild(searchClone);
-                        }
-                        if (filterSummary) {
-                            const summaryClone = filterSummary.cloneNode(true) as HTMLElement;
-                            summaryClone.className = summaryClone.className.replace(/animate-in|fade-in|slide-in-from-bottom-8|slide-in-from-top-8|duration-\d+/g, '');
-                            summaryClone.style.opacity = '1';
-                            summaryClone.style.transform = 'none';
-                            summaryClone.style.marginBottom = '40px';
-                            const cardListArea = summaryClone.querySelector('.space-y-4');
-                            if (cardListArea) cardListArea.remove();
-                            container.appendChild(summaryClone);
-                        }
-                    }
-                    
-                    chunk.forEach(card => {
-                        const clone = card.cloneNode(true) as HTMLElement;
-                        clone.className = clone.className.replace(/animate-in|fade-in|slide-in-from-bottom-8/g, '');
-                        clone.style.opacity = '1';
-                        clone.style.transform = 'none';
-                        clone.style.marginBottom = '40px';
-                        container.appendChild(clone);
-                    });
-                    
-                    document.body.appendChild(container);
-                    await new Promise(resolve => setTimeout(resolve, 100));
-                    await captureAndAddToPDF(container);
-                    document.body.removeChild(container);
-                }
-            }
-            
-            pdf.save(`智能選股報告_${dateStr}.pdf`);
-            
-        } catch (err: any) {
-            console.error('PDF 報告產生失敗:', err);
-            alert(err.message || 'PDF 報告產生失敗，請重試');
-        } finally {
-            window.scrollTo(0, originalScrollY);
-            setIsExportingPDF(false);
         }
     };
 
@@ -885,24 +704,14 @@ export default function SmartNavigatorPage() {
                         返回主控台
                     </button>
                     {hasResults && (
-                        <div className="flex items-center gap-3">
-                            <button
-                                onClick={handleDownload}
-                                disabled={isPrinting || isExportingPDF}
-                                className="flex items-center gap-2 px-4 py-2 bg-indigo-600/20 hover:bg-indigo-600/40 disabled:opacity-50 border border-indigo-500/40 rounded-xl text-indigo-400 text-sm font-black transition-all active:scale-95"
-                            >
-                                {isPrinting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-                                {isPrinting ? '產生中...' : '列印下載'}
-                            </button>
-                            <button
-                                onClick={handleDownloadPDF}
-                                disabled={isPrinting || isExportingPDF}
-                                className="flex items-center gap-2 px-4 py-2 bg-blue-600/20 hover:bg-blue-600/40 disabled:opacity-50 border border-blue-500/40 rounded-xl text-blue-400 text-sm font-black transition-all active:scale-95"
-                            >
-                                {isExportingPDF ? <Loader2 className="w-4 h-4 animate-spin" /> : <BookOpen className="w-4 h-4" />}
-                                {isExportingPDF ? '生成 PDF...' : '下載 PDF'}
-                            </button>
-                        </div>
+                        <button
+                            onClick={handleDownload}
+                            disabled={isPrinting}
+                            className="flex items-center gap-2 px-4 py-2 bg-indigo-600/20 hover:bg-indigo-600/40 disabled:opacity-50 border border-indigo-500/40 rounded-xl text-indigo-400 text-sm font-black transition-all active:scale-95"
+                        >
+                            {isPrinting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                            {isPrinting ? '產生中...' : '列印下載'}
+                        </button>
                     )}
                 </div>
 
@@ -916,7 +725,7 @@ export default function SmartNavigatorPage() {
                 </div>
 
                 {/* Input Area */}
-                <div id="stock-search-panel" className="bg-slate-900 border border-slate-800 rounded-3xl p-6 mb-8 shadow-2xl relative overflow-hidden">
+                <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 mb-8 shadow-2xl relative overflow-hidden">
                     <div className="flex flex-col md:flex-row flex-wrap gap-4 relative z-10">
                         <input
                             type="text"
@@ -1068,7 +877,7 @@ export default function SmartNavigatorPage() {
 
                 {/* Result Area (Auto Filter) */}
                 {showAutoFilter && filterCompleted && (
-                    <div id="stock-filter-summary-container" className="animate-in fade-in slide-in-from-bottom-8 duration-700">
+                    <div className="animate-in fade-in slide-in-from-bottom-8 duration-700">
                         <div className="flex items-center gap-3 mb-6">
                             <div className="h-[1px] flex-1 bg-slate-800"></div>
                             <div className={`font-black tracking-widest text-lg ${filterMode === 'distribution' ? 'text-rose-400' : 'text-indigo-400'}`}>

@@ -1,0 +1,6 @@
+- [x] 重寫 `handleDownload` 邏輯為分段圖片下載
+- [x] 實施日期與順序編號命名規則 (如 _Part1, _Part2)
+- [x] 移除 `jspdf` 邏輯以簡化代碼
+- [x] 測試多檔案連續下載的穩定性
+- [x] 推送到 GitHub
+- [x] 更新 Walkthrough 文件

@@ -444,7 +444,6 @@ export default function SmartNavigatorPage() {
 
     // Print State
     const [isPrinting, setIsPrinting] = useState(false);
-    const [isExportingPDF, setIsExportingPDF] = useState(false);
 
     const handleDownload = async () => {
         if (isPrinting) return;
@@ -504,30 +503,21 @@ export default function SmartNavigatorPage() {
                     if (i === 0) {
                         if (header) {
                             const headerClone = header.cloneNode(true) as HTMLElement;
-                            headerClone.className = headerClone.className.replace(/animate-in|fade-in|slide-in-from-bottom-8|slide-in-from-top-8|duration-\d+/g, '');
-                            headerClone.style.opacity = '1';
-                            headerClone.style.transform = 'none';
                             headerClone.style.marginBottom = '40px';
                             container.appendChild(headerClone);
                         }
                         if (searchPanel) {
                             const searchClone = searchPanel.cloneNode(true) as HTMLElement;
-                            searchClone.className = searchClone.className.replace(/animate-in|fade-in|slide-in-from-bottom-8|slide-in-from-top-8|duration-\d+/g, '');
-                            searchClone.style.opacity = '1';
-                            searchClone.style.transform = 'none';
                             searchClone.style.marginBottom = '40px';
+                            // 移除內部的動態元素或調整樣式以適合截圖
                             container.appendChild(searchClone);
                         }
                         if (filterSummary) {
                             const summaryClone = filterSummary.cloneNode(true) as HTMLElement;
-                            summaryClone.className = summaryClone.className.replace(/animate-in|fade-in|slide-in-from-bottom-8|slide-in-from-top-8|duration-\d+/g, '');
-                            summaryClone.style.opacity = '1';
-                            summaryClone.style.transform = 'none';
                             summaryClone.style.marginBottom = '40px';
-                            
-                            // 修正：使用 .space-y-4 (實際的列表容器類名) 移除克隆體內的卡片區域
-                            // 避免 Part 1 包含全部 90+ 檔股票導致畫布超限
-                            const cardListArea = summaryClone.querySelector('.space-y-4');
+                            // 只保留統計標題與按鈕部分，不要包含下方卡片列表（因為我們會另外加入）
+                            // 這裡透過 querySelector 移除克隆體內的卡片區域
+                            const cardListArea = summaryClone.querySelector('.space-y-12');
                             if (cardListArea) cardListArea.remove();
                             
                             container.appendChild(summaryClone);
@@ -546,9 +536,6 @@ export default function SmartNavigatorPage() {
                     });
                     
                     document.body.appendChild(container);
-                    
-                    // 加入微小延遲確保瀏覽器完成排版 (Layout)
-                    await new Promise(resolve => setTimeout(resolve, 100));
                     
                     // 高解析度捕捉 (固定 scale: 2)
                     const canvas = await html2canvas(container, {
@@ -577,130 +564,6 @@ export default function SmartNavigatorPage() {
         } finally {
             window.scrollTo(0, originalScrollY);
             setIsPrinting(false);
-        }
-    };
-
-    const handleDownloadPDF = async () => {
-        if (isExportingPDF) return;
-        setIsExportingPDF(true);
-        
-        const originalScrollY = window.scrollY;
-        const dateStr = new Date().toLocaleDateString('zh-TW', { year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/\//g, '');
-        
-        try {
-            const html2canvas = (await import('html2canvas')).default;
-            const { jsPDF } = await import('jspdf');
-            
-            const cards = Array.from(document.querySelectorAll('.stock-result-card'));
-            const header = document.querySelector('.text-center.mb-12');
-            const searchPanel = document.getElementById('stock-search-panel');
-            const filterSummary = document.getElementById('stock-filter-summary-container');
-            
-            // Initialize PDF
-            const pdf = new jsPDF('p', 'mm', 'a4');
-            const pdfWidth = pdf.internal.pageSize.getWidth();
-            const pdfPageHeight = pdf.internal.pageSize.getHeight();
-            let isFirstPage = true;
-
-            const captureAndAddToPDF = async (element: HTMLElement) => {
-                const canvas = await html2canvas(element, {
-                    scale: 2,
-                    useCORS: true,
-                    backgroundColor: '#020617',
-                    logging: false,
-                });
-                
-                const imgData = canvas.toDataURL('image/jpeg', 0.95);
-                const imgHeightMM = (canvas.height * pdfWidth) / canvas.width;
-                
-                let heightLeft = imgHeightMM;
-                let position = 0;
-
-                while (heightLeft > 0) {
-                    if (!isFirstPage) {
-                        pdf.addPage();
-                    }
-                    pdf.addImage(imgData, 'JPEG', 0, position, pdfWidth, imgHeightMM);
-                    heightLeft -= pdfPageHeight;
-                    position -= pdfPageHeight;
-                    isFirstPage = false;
-                }
-            };
-
-            if (cards.length === 0) {
-                // 單一股票查詢模式
-                const element = document.getElementById('smart-navigator-content');
-                if (!element) return;
-                window.scrollTo(0, 0);
-                await new Promise(resolve => setTimeout(resolve, 500));
-                await captureAndAddToPDF(element);
-            } else {
-                // 多檔股票自動篩選模式
-                const CHUNK_SIZE = 15;
-                for (let i = 0; i < cards.length; i += CHUNK_SIZE) {
-                    const chunk = cards.slice(i, i + CHUNK_SIZE);
-                    const container = document.createElement('div');
-                    container.style.position = 'absolute';
-                    container.style.left = '-9999px';
-                    container.style.top = '0';
-                    container.style.width = '800px'; 
-                    container.style.padding = '40px';
-                    container.style.backgroundColor = '#020617';
-                    container.style.color = 'white';
-                    
-                    if (i === 0) {
-                        if (header) {
-                            const headerClone = header.cloneNode(true) as HTMLElement;
-                            headerClone.className = headerClone.className.replace(/animate-in|fade-in|slide-in-from-bottom-8|slide-in-from-top-8|duration-\d+/g, '');
-                            headerClone.style.opacity = '1';
-                            headerClone.style.transform = 'none';
-                            headerClone.style.marginBottom = '40px';
-                            container.appendChild(headerClone);
-                        }
-                        if (searchPanel) {
-                            const searchClone = searchPanel.cloneNode(true) as HTMLElement;
-                            searchClone.className = searchClone.className.replace(/animate-in|fade-in|slide-in-from-bottom-8|slide-in-from-top-8|duration-\d+/g, '');
-                            searchClone.style.opacity = '1';
-                            searchClone.style.transform = 'none';
-                            searchClone.style.marginBottom = '40px';
-                            container.appendChild(searchClone);
-                        }
-                        if (filterSummary) {
-                            const summaryClone = filterSummary.cloneNode(true) as HTMLElement;
-                            summaryClone.className = summaryClone.className.replace(/animate-in|fade-in|slide-in-from-bottom-8|slide-in-from-top-8|duration-\d+/g, '');
-                            summaryClone.style.opacity = '1';
-                            summaryClone.style.transform = 'none';
-                            summaryClone.style.marginBottom = '40px';
-                            const cardListArea = summaryClone.querySelector('.space-y-4');
-                            if (cardListArea) cardListArea.remove();
-                            container.appendChild(summaryClone);
-                        }
-                    }
-                    
-                    chunk.forEach(card => {
-                        const clone = card.cloneNode(true) as HTMLElement;
-                        clone.className = clone.className.replace(/animate-in|fade-in|slide-in-from-bottom-8/g, '');
-                        clone.style.opacity = '1';
-                        clone.style.transform = 'none';
-                        clone.style.marginBottom = '40px';
-                        container.appendChild(clone);
-                    });
-                    
-                    document.body.appendChild(container);
-                    await new Promise(resolve => setTimeout(resolve, 100));
-                    await captureAndAddToPDF(container);
-                    document.body.removeChild(container);
-                }
-            }
-            
-            pdf.save(`智能選股報告_${dateStr}.pdf`);
-            
-        } catch (err: any) {
-            console.error('PDF 報告產生失敗:', err);
-            alert(err.message || 'PDF 報告產生失敗，請重試');
-        } finally {
-            window.scrollTo(0, originalScrollY);
-            setIsExportingPDF(false);
         }
     };
 
@@ -885,24 +748,14 @@ export default function SmartNavigatorPage() {
                         返回主控台
                     </button>
                     {hasResults && (
-                        <div className="flex items-center gap-3">
-                            <button
-                                onClick={handleDownload}
-                                disabled={isPrinting || isExportingPDF}
-                                className="flex items-center gap-2 px-4 py-2 bg-indigo-600/20 hover:bg-indigo-600/40 disabled:opacity-50 border border-indigo-500/40 rounded-xl text-indigo-400 text-sm font-black transition-all active:scale-95"
-                            >
-                                {isPrinting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-                                {isPrinting ? '產生中...' : '列印下載'}
-                            </button>
-                            <button
-                                onClick={handleDownloadPDF}
-                                disabled={isPrinting || isExportingPDF}
-                                className="flex items-center gap-2 px-4 py-2 bg-blue-600/20 hover:bg-blue-600/40 disabled:opacity-50 border border-blue-500/40 rounded-xl text-blue-400 text-sm font-black transition-all active:scale-95"
-                            >
-                                {isExportingPDF ? <Loader2 className="w-4 h-4 animate-spin" /> : <BookOpen className="w-4 h-4" />}
-                                {isExportingPDF ? '生成 PDF...' : '下載 PDF'}
-                            </button>
-                        </div>
+                        <button
+                            onClick={handleDownload}
+                            disabled={isPrinting}
+                            className="flex items-center gap-2 px-4 py-2 bg-indigo-600/20 hover:bg-indigo-600/40 disabled:opacity-50 border border-indigo-500/40 rounded-xl text-indigo-400 text-sm font-black transition-all active:scale-95"
+                        >
+                            {isPrinting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                            {isPrinting ? '產生中...' : '列印下載'}
+                        </button>
                     )}
                 </div>
 
