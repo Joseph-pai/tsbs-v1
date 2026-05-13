@@ -596,35 +596,19 @@ export default function SmartNavigatorPage() {
             const searchPanel = document.getElementById('stock-search-panel');
             const filterSummary = document.getElementById('stock-filter-summary-container');
             
-            // Initialize PDF
-            const pdf = new jsPDF('p', 'mm', 'a4');
-            const pdfWidth = pdf.internal.pageSize.getWidth();
-            const pdfPageHeight = pdf.internal.pageSize.getHeight();
-            let isFirstPage = true;
+            const capturedChunks: { data: string, widthMM: number, heightMM: number }[] = [];
+            const pdfWidth = 210;
 
-            const captureAndAddToPDF = async (element: HTMLElement) => {
+            const captureChunk = async (element: HTMLElement) => {
                 const canvas = await html2canvas(element, {
                     scale: 2,
                     useCORS: true,
                     backgroundColor: '#020617',
                     logging: false,
                 });
-                
-                const imgData = canvas.toDataURL('image/jpeg', 0.95);
+                const imgData = canvas.toDataURL('image/jpeg', 0.92);
                 const imgHeightMM = (canvas.height * pdfWidth) / canvas.width;
-                
-                let heightLeft = imgHeightMM;
-                let position = 0;
-
-                while (heightLeft > 0) {
-                    if (!isFirstPage) {
-                        pdf.addPage();
-                    }
-                    pdf.addImage(imgData, 'JPEG', 0, position, pdfWidth, imgHeightMM);
-                    heightLeft -= pdfPageHeight;
-                    position -= pdfPageHeight;
-                    isFirstPage = false;
-                }
+                capturedChunks.push({ data: imgData, widthMM: pdfWidth, heightMM: imgHeightMM });
             };
 
             if (cards.length === 0) {
@@ -633,7 +617,7 @@ export default function SmartNavigatorPage() {
                 if (!element) return;
                 window.scrollTo(0, 0);
                 await new Promise(resolve => setTimeout(resolve, 500));
-                await captureAndAddToPDF(element);
+                await captureChunk(element);
             } else {
                 // 多檔股票自動篩選模式
                 const CHUNK_SIZE = 15;
@@ -688,12 +672,27 @@ export default function SmartNavigatorPage() {
                     
                     document.body.appendChild(container);
                     await new Promise(resolve => setTimeout(resolve, 100));
-                    await captureAndAddToPDF(container);
+                    await captureChunk(container);
                     document.body.removeChild(container);
                 }
             }
             
-            pdf.save(`智能選股報告_${dateStr}.pdf`);
+            if (capturedChunks.length > 0) {
+                const totalHeightMM = capturedChunks.reduce((sum, c) => sum + c.heightMM, 0);
+                // Create PDF with custom long page size
+                const pdf = new jsPDF({
+                    orientation: 'portrait',
+                    unit: 'mm',
+                    format: [pdfWidth, totalHeightMM]
+                });
+                
+                let currentY = 0;
+                for (const chunk of capturedChunks) {
+                    pdf.addImage(chunk.data, 'JPEG', 0, currentY, chunk.widthMM, chunk.heightMM);
+                    currentY += chunk.heightMM;
+                }
+                pdf.save(`智能選股報告_${dateStr}.pdf`);
+            }
             
         } catch (err: any) {
             console.error('PDF 報告產生失敗:', err);
