@@ -22,43 +22,90 @@ export const exportToPDF = async (elementId: string, filename: string): Promise<
   const savedScrollY = window.scrollY;
   const savedScrollX = window.scrollX;
 
-  // 強制捲動至文件最頂部，確保 html2canvas 座標與 DOM 對齊
+  // 強制捲動至文件最頂部，確保截圖完整
   window.scrollTo(0, 0);
-  await new Promise(r => setTimeout(r, 150));
+  await new Promise(r => setTimeout(r, 300)); // 增加延遲確保渲染穩定
 
-  // 一次性截取整個元素，完整高度，不傳 y / height 分塊參數
-  const canvas = await html2canvas(element, {
-    scale: 2, // 提升解析度以確保文字清晰
-    useCORS: true,
-    backgroundColor: '#020617',
-    scrollX: 0,
-    scrollY: 0,
-    logging: false,
-  });
+  const elementWidth = element.offsetWidth;
+  const elementHeight = element.offsetHeight;
+  const chunkHeight = 3000; // 每段截取的高度，避免 Canvas 超出瀏覽器限制
+  const totalChunks = Math.ceil(elementHeight / chunkHeight);
+  
+  const capturedChunks: { data: string; heightMM: number }[] = [];
+  const pdfWidth = 210; // 固定 PDF 寬度 210mm (A4 標準寬度)
 
-  const imgData = canvas.toDataURL('image/jpeg', 0.92);
+  try {
+    for (let i = 0; i < totalChunks; i++) {
+      const yOffset = i * chunkHeight;
+      const h = Math.min(chunkHeight, elementHeight - yOffset);
 
-  if (!imgData || imgData === 'data:,' || imgData.length < 100) {
+      // 建立一個臨時容器來截取特定區段
+      const container = document.createElement('div');
+      container.style.width = `${elementWidth}px`;
+      container.style.height = `${h}px`;
+      container.style.overflow = 'hidden';
+      container.style.position = 'absolute';
+      container.style.left = '-9999px';
+      container.style.top = '0';
+      container.style.backgroundColor = '#020617';
+
+      // 複製目標元素並位移，只露出當前要截取的區段
+      const clone = element.cloneNode(true) as HTMLElement;
+      clone.style.marginTop = `-${yOffset}px`;
+      clone.style.width = `${elementWidth}px`;
+      clone.style.transform = 'none';
+      clone.style.transition = 'none';
+      clone.style.animation = 'none';
+      
+      container.appendChild(clone);
+      document.body.appendChild(container);
+
+      // 給予微小延遲確保 DOM 掛載與渲染完成
+      await new Promise(r => setTimeout(r, 150));
+
+      const canvas = await html2canvas(container, {
+        scale: 2, // 保持高品質
+        useCORS: true,
+        backgroundColor: '#020617',
+        logging: false,
+      });
+
+      const imgData = canvas.toDataURL('image/jpeg', 0.92);
+      
+      if (!imgData || imgData === 'data:,' || imgData.length < 100) {
+        throw new Error(`區段 ${i + 1} 截取失敗，請稍後再試。`);
+      }
+
+      const imgHeightMM = (canvas.height * pdfWidth) / canvas.width;
+      capturedChunks.push({ data: imgData, heightMM: imgHeightMM });
+
+      // 清理臨時容器
+      document.body.removeChild(container);
+      
+      // 每一段截完稍作休息，避免瀏覽器卡死
+      if (totalChunks > 1) await new Promise(r => setTimeout(r, 200));
+    }
+
+    // 計算 PDF 總高度並生成檔案
+    const totalHeightMM = capturedChunks.reduce((sum, c) => sum + c.heightMM, 0);
+    const pdf = new jsPDF({
+      orientation: 'portrait',
+      unit: 'mm',
+      format: [pdfWidth, totalHeightMM]
+    });
+
+    let currentY = 0;
+    for (const chunk of capturedChunks) {
+      pdf.addImage(chunk.data, 'JPEG', 0, currentY, pdfWidth, chunk.heightMM);
+      currentY += chunk.heightMM;
+    }
+
+    pdf.save(filename);
+  } catch (error: any) {
+    console.error('[pdfUtils] Export failed:', error);
+    throw error;
+  } finally {
+    // 恢復原本的捲動位置
     window.scrollTo(savedScrollX, savedScrollY);
-    throw new Error('截圖失敗，畫面元素可能尚未渲染完成，請稍後再試。');
   }
-
-  // 1. 計算 PDF 寬度與對應的高度 (以 210mm 為基準寬度)
-  const pdfWidth = 210;
-  const imgHeightMM = (canvas.height * pdfWidth) / canvas.width;
-
-  // 2. 建立自定義高度的 PDF (單頁長卷，消除分頁斷裂)
-  const pdf = new jsPDF({
-    orientation: 'portrait',
-    unit: 'mm',
-    format: [pdfWidth, imgHeightMM]
-  });
-
-  // 3. 直接貼入單張完整大圖
-  pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, imgHeightMM);
-
-  pdf.save(filename);
-
-  // 恢復原本的捲動位置
-  window.scrollTo(savedScrollX, savedScrollY);
 };
