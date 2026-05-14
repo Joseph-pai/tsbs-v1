@@ -620,7 +620,7 @@ export default function SmartNavigatorPage() {
                 await captureChunk(element);
             } else {
                 // 多檔股票自動篩選模式
-                const CHUNK_SIZE = 15;
+                const CHUNK_SIZE = 20;
                 for (let i = 0; i < cards.length; i += CHUNK_SIZE) {
                     const chunk = cards.slice(i, i + CHUNK_SIZE);
                     const container = document.createElement('div');
@@ -678,19 +678,22 @@ export default function SmartNavigatorPage() {
             }
             
             if (capturedChunks.length > 0) {
-                const totalHeightMM = capturedChunks.reduce((sum, c) => sum + c.heightMM, 0);
-                // Create PDF with custom long page size
+                // 根據第一個區塊的高度建立第一頁
                 const pdf = new jsPDF({
                     orientation: 'portrait',
                     unit: 'mm',
-                    format: [pdfWidth, totalHeightMM]
+                    format: [pdfWidth, capturedChunks[0].heightMM]
                 });
                 
-                let currentY = 0;
-                for (const chunk of capturedChunks) {
-                    pdf.addImage(chunk.data, 'JPEG', 0, currentY, chunk.widthMM, chunk.heightMM);
-                    currentY += chunk.heightMM;
+                pdf.addImage(capturedChunks[0].data, 'JPEG', 0, 0, pdfWidth, capturedChunks[0].heightMM);
+
+                // 為後續每個區塊動態新增一頁
+                for (let i = 1; i < capturedChunks.length; i++) {
+                    const chunk = capturedChunks[i];
+                    pdf.addPage([pdfWidth, chunk.heightMM], 'portrait');
+                    pdf.addImage(chunk.data, 'JPEG', 0, 0, pdfWidth, chunk.heightMM);
                 }
+                
                 pdf.save(`智能選股報告_${dateStr}.pdf`);
             }
             
