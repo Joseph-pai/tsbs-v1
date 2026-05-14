@@ -101,11 +101,11 @@ const lightText = {
 // --- Mini Calendar Component ---
 interface MiniCalendarProps {
     recordDates: Set<string>;
-    selectedDate: string | null;
+    selectedDates: string[];
     onSelectDate: (date: string) => void;
 }
 
-function MiniCalendar({ recordDates, selectedDate, onSelectDate }: MiniCalendarProps) {
+function MiniCalendar({ recordDates, selectedDates, onSelectDate }: MiniCalendarProps) {
     const [viewMonth, setViewMonth] = useState(() => new Date());
     const days = useMemo(() => {
         const start = startOfMonth(viewMonth);
@@ -133,7 +133,7 @@ function MiniCalendar({ recordDates, selectedDate, onSelectDate }: MiniCalendarP
                 {days.map(day => {
                     const dateStr = format(day, 'yyyy-MM-dd');
                     const hasRecord = recordDates.has(dateStr);
-                    const isSelected = selectedDate === dateStr;
+                    const isSelected = selectedDates.includes(dateStr);
                     return (
                         <button
                             key={dateStr}
@@ -432,7 +432,7 @@ export default function SmartNavigatorPage() {
     const [autoPeriod, setAutoPeriod] = useState('30');
     const [maxPosition, setMaxPosition] = useState('70');
     const [scanRecords, setScanRecords] = useState<any[]>([]);
-    const [selectedDate, setSelectedDate] = useState<string | null>(null);
+    const [selectedDates, setSelectedDates] = useState<string[]>([]);
     const [isFiltering, setIsFiltering] = useState(false);
     const [filterProgress, setFilterProgress] = useState({ current: 0, total: 0, phase: '' });
     const [filterResults, setFilterResults] = useState<Array<{stockId: string, stockName: string, data: any, distributionLevel?: string | null}>>([]);
@@ -750,7 +750,7 @@ export default function SmartNavigatorPage() {
     };
 
     const handleAutoFilter = async (stocksToRetry?: Array<{id: string, name: string}>) => {
-        if (!selectedDate && !stocksToRetry) return;
+        if (selectedDates.length === 0 && !stocksToRetry) return;
         setIsFiltering(true);
         setError(null);
         setFilterCompleted(false);
@@ -771,7 +771,8 @@ export default function SmartNavigatorPage() {
                 // Find all stocks scanned on the selected date
                 const targetRecords = scanRecords.filter(r => {
                     if (!r.createdAt?.seconds) return false;
-                    return format(new Date(r.createdAt.seconds * 1000), 'yyyy-MM-dd') === selectedDate;
+                    const rDate = format(new Date(r.createdAt.seconds * 1000), 'yyyy-MM-dd');
+                    return selectedDates.includes(rDate);
                 });
 
                 // Extract unique stocks
@@ -969,8 +970,12 @@ export default function SmartNavigatorPage() {
                                     </div>
                                     <MiniCalendar 
                                         recordDates={recordDates} 
-                                        selectedDate={selectedDate} 
-                                        onSelectDate={setSelectedDate} 
+                                        selectedDates={selectedDates} 
+                                        onSelectDate={(date) => {
+                                            setSelectedDates(prev =>
+                                                prev.includes(date) ? prev.filter(d => d !== date) : [...prev, date]
+                                            );
+                                        }} 
                                     />
                                 </div>
                                 
@@ -1016,7 +1021,7 @@ export default function SmartNavigatorPage() {
                                     
                                     <button
                                         onClick={() => handleAutoFilter()}
-                                        disabled={isFiltering || !selectedDate}
+                                        disabled={isFiltering || selectedDates.length === 0}
                                         className="w-full mt-4 bg-amber-600 hover:bg-amber-500 disabled:bg-slate-800 disabled:text-slate-500 text-white font-black py-3 rounded-xl transition-all flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(217,119,6,0.3)] disabled:shadow-none"
                                     >
                                         {isFiltering ? (
