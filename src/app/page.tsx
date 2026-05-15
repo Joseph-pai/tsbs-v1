@@ -136,6 +136,8 @@ export default function DashboardPage() {
         setSector(parsed.sector || (parsed.market === 'TWSE' ? 'ALL' : 'AL'));
         setHasScanned(parsed.hasScanned || false);
         setTiming(parsed.timing || null);
+        setEnhancedResults(parsed.enhancedResults || []);
+        setActiveTab(parsed.activeTab || 'original');
       } catch (e) {
         console.error('Failed to load session state:', e);
       }
@@ -144,9 +146,9 @@ export default function DashboardPage() {
 
   useEffect(() => {
     sessionStorage.setItem('tsbs_scanner_state', JSON.stringify({
-      results, settings, market, sector, hasScanned, timing
+      results, settings, market, sector, hasScanned, timing, enhancedResults, activeTab
     }));
-  }, [results, settings, market, sector, hasScanned, timing]);
+  }, [results, settings, market, sector, hasScanned, timing, enhancedResults, activeTab]);
 
   // 2. Heavy Market Data Caching (Session-based)
   useEffect(() => {
