@@ -4,7 +4,7 @@ import { StockCard } from '@/components/dashboard/StockCard';
 import { AnalysisResult, StockData, HistorySession } from '@/types';
 import { SECTORS, MarketType, MARKET_NAMES } from '@/lib/sectors';
 import { StockSearch } from '@/components/dashboard/StockSearch';
-import { Search, TrendingUp, Sparkles, Filter, Loader2, Flame, Settings, Target, BarChart3, Info, BookOpen, X, HelpCircle, AlertTriangle, History, Trash2, Calendar, FlaskConical, CheckCircle2, XCircle, LogOut, RefreshCw, Download, ChevronLeft, ChevronRight, CheckSquare, Square, Compass, Zap } from 'lucide-react';
+import { Search, TrendingUp, Sparkles, Filter, Loader2, Flame, Settings, Target, BarChart3, Info, BookOpen, X, HelpCircle, AlertTriangle, History, Trash2, Calendar, FlaskConical, CheckCircle2, XCircle, LogOut, RefreshCw, Download, ChevronLeft, ChevronRight, CheckSquare, Square, Compass } from 'lucide-react';
 import { useState, useMemo, useEffect } from 'react';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, getDay, addMonths, subMonths } from 'date-fns';
 import { useRouter } from 'next/navigation';
@@ -78,13 +78,6 @@ export default function DashboardPage() {
   const [backtestCalViewMonth, setBacktestCalViewMonth] = useState(() => new Date());
   const [historySelectedDates, setHistorySelectedDates] = useState<Set<string>>(new Set());
   const [historyCalViewMonth, setHistoryCalViewMonth] = useState(() => new Date());
-
-  // ── 強化評分掃描 ──
-  const [enhancedResults, setEnhancedResults] = useState<AnalysisResult[]>([]);
-  const [isEnhancedScanning, setIsEnhancedScanning] = useState(false);
-  const [enhancedProgress, setEnhancedProgress] = useState({ current: 0, total: 0, phase: '' });
-  const [activeTab, setActiveTab] = useState<'original' | 'enhanced'>('original');
-  const [backtestScanMode, setBacktestScanMode] = useState<'original' | 'enhanced'>('original');
 
   const handleLogout = async () => {
     try {
@@ -252,11 +245,6 @@ export default function DashboardPage() {
 
       // ── 日期篩選：若用戶有選取日期，只處理選中日期的 session ──
       if (backtestSelectedDates.size > 0 && !backtestSelectedDates.has(fromDate)) return;
-
-      // ── 掃描模式篩選：依用戶選擇的來源（原始/強化）過濾 ──
-      // 舊紀錄（沒有 scanMode 欄位）視為 'original'（向後兼容）
-      const sessionMode = session.scanMode || 'original';
-      if (sessionMode !== backtestScanMode) return;
 
       items.forEach(r => {
         // 🔧 過濾當日掃描：fromDate === todayStr 時，API 一定回傳「當日無歷史數據」，直接跳過
@@ -610,7 +598,6 @@ export default function DashboardPage() {
           saveScanRecord(user.uid, {
             market,
             sector: currentSectorName,
-            scanMode: 'original',
             data: filteredResults.map(r => ({
               ...r,
               score: r.potential_score
@@ -637,125 +624,11 @@ export default function DashboardPage() {
     }
   };
 
-  // ────────────────────────────────────────────────
-  //  強化評分掃描（獨立於原始掃描，不影響任何現有邏輯）
-  // ────────────────────────────────────────────────
-  const runEnhancedScan = async () => {
-    setIsEnhancedScanning(true);
-    setActiveTab('enhanced');
-    setEnhancedProgress({ current: 0, total: 0, phase: '正在獲取市場快照...' });
-    const t0 = Date.now();
-
-    try {
-      const snapshotRes = await fetch(`/api/market/snapshot?market=${market}&sector=${sector}`);
-      const snapshotJson = await snapshotRes.json();
-      if (!snapshotJson.success) throw new Error(snapshotJson.error);
-      const snap: StockData[] = snapshotJson.data;
-      const t1 = Date.now();
-
-      setEnhancedProgress({ current: 0, total: snap.length, phase: '強化篩選候選股（成交金額排序）...' });
-
-      const targetTerm = searchTerm.trim();
-      const isSearchId = targetTerm.length === 4 && !isNaN(parseInt(targetTerm));
-
-      // Phase 1：改用成交金額（量×價）排序，讓小股本被公平評估
-      const candidates = snap
-        .filter(s => {
-          const isTarget = isSearchId && s.stock_id === targetTerm;
-          const isPotential = s.Trading_Volume > 0 && s.spread >= -0.1;
-          return isTarget || isPotential;
-        })
-        .sort((a, b) => {
-          const aIsTarget = isSearchId && a.stock_id === targetTerm;
-          const bIsTarget = isSearchId && b.stock_id === targetTerm;
-          if (aIsTarget && !bIsTarget) return -1;
-          if (!aIsTarget && bIsTarget) return 1;
-          // 成交金額 = 量 × 收盤價（間接換手率正規化）
-          const aTurnover = (a as any).Trading_money || a.Trading_Volume * a.close;
-          const bTurnover = (b as any).Trading_money || b.Trading_Volume * b.close;
-          return bTurnover - aTurnover;
-        })
-        .slice(0, 250); // 比原始多 50 支，覆蓋更多小股本
-
-      setEnhancedProgress({ current: 0, total: candidates.length, phase: '強化指標深度分析中...' });
-
-      const BATCH_SIZE = 25;
-      const allEnhancedResults: AnalysisResult[] = [];
-
-      for (let i = 0; i < candidates.length; i += BATCH_SIZE) {
-        const batch = candidates.slice(i, i + BATCH_SIZE);
-        setEnhancedProgress({
-          current: i + batch.length,
-          total: candidates.length,
-          phase: `強化分析中 (${i + batch.length}/${candidates.length})`
-        });
-
-        const batchRes = await fetch('/api/scan/analyze', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            stocks: batch.map(c => ({ id: c.stock_id, name: c.stock_name })),
-            settings: settings,
-            enhanced: true  // 啟用強化評分模式
-          })
-        });
-
-        const batchJson = await batchRes.json();
-        if (batchJson.success && batchJson.data) {
-          const augmented = batchJson.data.map((r: any) => ({
-            ...r,
-            sector_name: r.sector_name || (market === 'TWSE' ? '上市板' : '上櫃板'),
-            potential_score: r.comprehensiveScoreDetails?.total ?? ((r.score || 0) * 100)
-          }));
-          allEnhancedResults.push(...augmented);
-        }
-      }
-
-      const t_end = Date.now();
-      const filteredEnhanced = allEnhancedResults
-        .filter(r => {
-          const isTargetMatch = r.stock_id.includes(targetTerm) || r.stock_name.includes(targetTerm);
-          return r.is_recommended || (targetTerm.length >= 2 && isTargetMatch);
-        })
-        .sort((a, b) => (b.potential_score || 0) - (a.potential_score || 0));
-
-      setEnhancedResults(filteredEnhanced);
-
-      // 儲存至 Firebase（標記為 enhanced 模式）
-      if (user && filteredEnhanced.length > 0) {
-        const conditionDesc = `[強化] V${settings.volumeWeight} MA${settings.maWeight} B${settings.breakoutWeight} RS${settings.rsWeight}`;
-        saveScanRecord(user.uid, {
-          market,
-          sector: currentSectorName,
-          scanMode: 'enhanced',
-          data: filteredEnhanced.map(r => ({ ...r, score: r.potential_score }))
-        }, conditionDesc).catch(console.error);
-      }
-
-      setEnhancedProgress({
-        current: candidates.length,
-        total: candidates.length,
-        phase: `強化掃描完成：找到 ${filteredEnhanced.length} 支`
-      });
-
-    } catch (e: any) {
-      console.error('[EnhancedScan]', e);
-    } finally {
-      setIsEnhancedScanning(false);
-    }
-  };
-
   const filteredResults = useMemo(() => {
     return results.filter(s =>
       s.stock_id.includes(searchTerm) || s.stock_name.includes(searchTerm)
     );
   }, [results, searchTerm]);
-
-  const filteredEnhancedResults = useMemo(() => {
-    return enhancedResults.filter(s =>
-      s.stock_id.includes(searchTerm) || s.stock_name.includes(searchTerm)
-    );
-  }, [enhancedResults, searchTerm]);
 
   const isWorking = stage !== 'idle' && stage !== 'complete';
 
@@ -994,61 +867,23 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Execute Buttons */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-        {/* 原始共振掃描按鈕 */}
-        <button
-          onClick={() => { setActiveTab('original'); runScan(); }}
-          disabled={isWorking || isEnhancedScanning}
-          className={clsx(
-            "flex flex-col items-center justify-center p-8 rounded-[3rem] border-4 transition-all active:scale-[0.98] group shadow-2xl relative overflow-hidden",
-            isWorking
-              ? "bg-slate-900 border-slate-800 cursor-not-allowed"
-              : "bg-gradient-to-r from-blue-700 to-blue-500 border-blue-400 text-white shadow-blue-500/40 hover:scale-[1.02]"
-          )}
-        >
-          {isWorking ? <Loader2 className="w-10 h-10 animate-spin mb-2" /> : <Flame className="w-10 h-10 mb-2 group-hover:scale-125 transition-transform" />}
-          <span className="text-xl font-black uppercase tracking-widest">定點共振掃描</span>
-          <span className="text-sm font-bold text-white/60 mt-1">原始評分模式</span>
-        </button>
-
-        {/* 強化評分掃描按鈕 */}
-        <button
-          onClick={runEnhancedScan}
-          disabled={isEnhancedScanning || isWorking}
-          className={clsx(
-            "flex flex-col items-center justify-center p-8 rounded-[3rem] border-4 transition-all active:scale-[0.98] group shadow-2xl relative overflow-hidden",
-            isEnhancedScanning
-              ? "bg-slate-900 border-slate-800 cursor-not-allowed"
-              : "bg-gradient-to-r from-purple-700 to-purple-500 border-purple-400 text-white shadow-purple-500/40 hover:scale-[1.02]"
-          )}
-        >
-          {isEnhancedScanning ? <Loader2 className="w-10 h-10 animate-spin mb-2" /> : <Zap className="w-10 h-10 mb-2 group-hover:scale-125 transition-transform" />}
-          <span className="text-xl font-black uppercase tracking-widest">強化評分掃描</span>
-          <span className="text-sm font-bold text-white/60 mt-1">位階×月營收×成交金額</span>
-        </button>
-      </div>
-
-      {/* Enhanced Scan Progress */}
-      {isEnhancedScanning && (
-        <div className="p-8 bg-purple-900/20 border-2 border-purple-500/30 rounded-[2rem] mb-6 space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-3 h-3 bg-purple-400 rounded-full animate-ping" />
-              <span className="text-lg font-black text-purple-300">{enhancedProgress.phase}</span>
-            </div>
-            <span className="text-base font-mono font-black text-purple-500">
-              {Math.round((enhancedProgress.current / (enhancedProgress.total || 1)) * 100)}%
-            </span>
-          </div>
-          <div className="w-full bg-slate-800 rounded-full h-6 overflow-hidden border border-white/5">
-            <div
-              className="h-full bg-gradient-to-r from-purple-600 to-pink-500 transition-all duration-500"
-              style={{ width: enhancedProgress.total > 0 ? `${(enhancedProgress.current / enhancedProgress.total) * 100}%` : '10%' }}
-            />
-          </div>
-        </div>
-      )}
+      {/* Execute Button */}
+      <button
+        onClick={() => runScan()}
+        disabled={isWorking}
+        className={clsx(
+          "w-full flex flex-col items-center justify-center p-10 rounded-[3rem] border-4 transition-all active:scale-[0.98] mb-12 group shadow-2xl relative overflow-hidden",
+          isWorking
+            ? "bg-slate-900 border-slate-800 cursor-not-allowed"
+            : "bg-gradient-to-r from-blue-700 to-blue-500 border-blue-400 text-white shadow-blue-500/40 hover:scale-[1.02]"
+        )}
+      >
+        {isWorking ? <Loader2 className="w-12 h-12 animate-spin mb-3" /> : <Flame className="w-12 h-12 mb-3 group-hover:scale-125 transition-transform" />}
+        <span className="text-3xl font-black uppercase tracking-widest">啟動定點共振掃描</span>
+        <span className="text-lg font-bold text-white/60 mt-3">
+          已鎖定目標：{MARKET_NAMES[market]} - {currentSectorName}
+        </span>
+      </button>
 
       {/* Progress & Search (Integrated Panel) */}
       <div className="space-y-8 mb-12">
@@ -1083,7 +918,7 @@ export default function DashboardPage() {
       </div>
 
       {/* Results Container */}
-      <div className="space-y-6">
+      <div className="space-y-10">
         {error && (
           <div className="p-10 bg-rose-500/10 border-4 border-rose-500/20 rounded-[3rem] text-center">
             <p className="text-2xl font-black text-rose-400">{error}</p>
@@ -1091,137 +926,63 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {/* Tab 切換（只有至少一組結果時顯示） */}
-        {(hasScanned || enhancedResults.length > 0) && !isWorking && !isEnhancedScanning && (
-          <div className="flex gap-3">
-            <button
-              onClick={() => setActiveTab('original')}
-              className={clsx(
-                "flex-1 py-3 px-4 rounded-2xl font-black text-base transition-all border-2",
-                activeTab === 'original'
-                  ? "bg-blue-500/20 border-blue-500/60 text-blue-400"
-                  : "bg-slate-900 border-slate-800 text-slate-500 hover:border-slate-600"
-              )}
-            >
-              🔥 原始共振掃描 {results.length > 0 && `(${results.length}支)`}
-            </button>
-            <button
-              onClick={() => setActiveTab('enhanced')}
-              className={clsx(
-                "flex-1 py-3 px-4 rounded-2xl font-black text-base transition-all border-2",
-                activeTab === 'enhanced'
-                  ? "bg-purple-500/20 border-purple-500/60 text-purple-400"
-                  : "bg-slate-900 border-slate-800 text-slate-500 hover:border-slate-600"
-              )}
-            >
-              ⚡ 強化評分掃描 {enhancedResults.length > 0 && `(${enhancedResults.length}支)`}
-            </button>
+        {!hasScanned && !isWorking && !error ? (
+          <div className="py-40 text-center border-4 border-dashed border-slate-900 rounded-[4rem] bg-slate-900/10 opacity-60">
+            <TrendingUp className="w-24 h-24 text-slate-800 mx-auto mb-8" />
+            <p className="text-3xl font-black text-slate-400">等待定點掃描任務</p>
+            <p className="text-slate-600 text-xl font-black mt-4">請選定目標後按下啟動鈕</p>
           </div>
-        )}
-
-        {/* 原始掃描結果 */}
-        {activeTab === 'original' && (
-          <>
-            {!hasScanned && !isWorking && !error ? (
-              <div className="py-40 text-center border-4 border-dashed border-slate-900 rounded-[4rem] bg-slate-900/10 opacity-60">
-                <TrendingUp className="w-24 h-24 text-slate-800 mx-auto mb-8" />
-                <p className="text-3xl font-black text-slate-400">等待定點掃描任務</p>
-                <p className="text-slate-600 text-xl font-black mt-4">請選定目標後按下啟動鈕</p>
-              </div>
-            ) : filteredResults.length === 0 && hasScanned && !isWorking ? (
-              <div className="py-40 text-center border-4 border-dashed border-rose-900/30 rounded-[4rem] bg-rose-500/5 px-10">
-                <div className="text-9xl mb-10">🔍</div>
-                <p className="text-rose-400 font-black text-5xl mb-6 leading-tight">沒有找到符合條件的股票，請明天再試</p>
-                <div className="max-w-md mx-auto space-y-6">
-                  <p className="text-slate-500 text-2xl font-black leading-relaxed">
-                    已深度分析 {timing?.candidatesCount} 支股票 (市場總量: {timing?.totalStocks} 支)，但在目前配置下未發現「完美共振」。
-                  </p>
-                  <div className="p-8 bg-blue-500/10 rounded-[2rem] border-2 border-blue-500/20 mt-8 text-left">
-                    <div className="flex items-center gap-3 mb-4">
-                      <Info className="w-6 h-6 text-blue-400" />
-                      <p className="text-blue-400 text-xl font-black">為什麼找不到？</p>
-                    </div>
-                    <ul className="text-slate-400 text-lg font-bold space-y-4">
-                      <li>1. **總合門檻嚴格**：系統預設綜合評分需達 70 分才算具備動能共振爆發力。</li>
-                      <li>2. **流動性防護**：市場中可能缺乏同時具備「良好流動性」與「高 {settings.volumeWeight}% 量能共振」的標的。</li>
-                      <li className="text-blue-400 font-black mt-4">👉 建議：大盤可能處於量縮盤整或系統性走弱，請耐心等待多頭趨勢或放寬權重分布。</li>
-                    </ul>
-                  </div>
+        ) : filteredResults.length === 0 && hasScanned && !isWorking ? (
+          <div className="py-40 text-center border-4 border-dashed border-rose-900/30 rounded-[4rem] bg-rose-500/5 px-10">
+            <div className="text-9xl mb-10">🔍</div>
+            <p className="text-rose-400 font-black text-5xl mb-6 leading-tight">沒有找到符合條件的股票，請明天再試</p>
+            <div className="max-w-md mx-auto space-y-6">
+              <p className="text-slate-500 text-2xl font-black leading-relaxed">
+                已深度分析 {timing?.candidatesCount} 支股票 (市場總量: {timing?.totalStocks} 支)，但在目前配置下未發現「完美共振」。
+              </p>
+              <div className="p-8 bg-blue-500/10 rounded-[2rem] border-2 border-blue-500/20 mt-8 text-left">
+                <div className="flex items-center gap-3 mb-4">
+                  <Info className="w-6 h-6 text-blue-400" />
+                  <p className="text-blue-400 text-xl font-black">為什麼找不到？</p>
                 </div>
+                <ul className="text-slate-400 text-lg font-bold space-y-4">
+                  <li>1. **總合門檻嚴格**：系統預設綜合評分需達 70 分才算具備動能共振爆發力。</li>
+                  <li>2. **流動性防護**：市場中可能缺乏同時具備「良好流動性」與「高 {settings.volumeWeight}% 量能共振」的標的。</li>
+                  <li className="text-blue-400 font-black mt-4">👉 建議：大盤可能處於量縮盤整或系統性走弱，請耐心等待多頭趨勢或放寬權重分布。</li>
+                </ul>
               </div>
-            ) : filteredResults.length > 0 ? (
-              <div className="relative animate-in fade-in slide-in-from-bottom-8 duration-700">
-                <div className="flex justify-end mb-4 pr-2">
-                  <button
-                    onClick={async () => {
-                      setIsExportingPDF(true);
-                      await new Promise(r => setTimeout(r, 100));
-                      try {
-                        const dateStr = format(new Date(), 'yyyyMMdd_HHmm');
-                        await exportToPDF('scan-results-container', `共振掃描結果_${dateStr}.pdf`);
-                      } finally {
-                        setIsExportingPDF(false);
-                      }
-                    }}
-                    disabled={isExportingPDF}
-                    className="inline-flex items-center gap-2 px-4 py-2 bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 border border-blue-500/30 rounded-xl transition-all font-black text-sm disabled:opacity-50"
-                  >
-                    {isExportingPDF ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-                    {isExportingPDF ? '生成中...' : '匯出為 PDF'}
-                  </button>
+            </div>
+          </div>
+        ) : (
+          <div className="relative animate-in fade-in slide-in-from-bottom-8 duration-700">
+            <div className="flex justify-end mb-4 pr-2">
+              <button
+                onClick={async () => {
+                  setIsExportingPDF(true);
+                  // 等待 React 完成 re-render（按鈕切換成 loading 狀態）
+                  await new Promise(r => setTimeout(r, 100));
+                  try {
+                    const dateStr = format(new Date(), 'yyyyMMdd_HHmm');
+                    await exportToPDF('scan-results-container', `共振掃描結果_${dateStr}.pdf`);
+                  } finally {
+                    setIsExportingPDF(false);
+                  }
+                }}
+                disabled={isExportingPDF}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 border border-blue-500/30 rounded-xl transition-all font-black text-sm disabled:opacity-50"
+              >
+                {isExportingPDF ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                {isExportingPDF ? '生成中...' : '匯出為 PDF'}
+              </button>
+            </div>
+            <div id="scan-results-container" className="grid grid-cols-1 gap-10 bg-slate-950 p-[2px] rounded-[3rem]">
+              {filteredResults.map((stock, index) => (
+                <div key={stock.stock_id} onClick={() => router.push(`/stock/${stock.stock_id}`)}>
+                  <StockCard data={stock} index={index + 1} />
                 </div>
-                <div id="scan-results-container" className="grid grid-cols-1 gap-10 bg-slate-950 p-[2px] rounded-[3rem]">
-                  {filteredResults.map((stock, index) => (
-                    <div key={stock.stock_id} onClick={() => router.push(`/stock/${stock.stock_id}`)}>
-                      <StockCard data={stock} index={index + 1} />
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-          </>
-        )}
-
-        {/* 強化評分結果 */}
-        {activeTab === 'enhanced' && (
-          <>
-            {filteredEnhancedResults.length === 0 && !isEnhancedScanning ? (
-              <div className="py-40 text-center border-4 border-dashed border-purple-900/30 rounded-[4rem] bg-purple-500/5 px-10">
-                <div className="text-8xl mb-8">⚡</div>
-                <p className="text-purple-400 font-black text-4xl mb-4">尚未執行強化掃描</p>
-                <p className="text-slate-500 text-xl font-black">請按「強化評分掃描」按鈕</p>
-              </div>
-            ) : filteredEnhancedResults.length > 0 ? (
-              <div className="relative animate-in fade-in slide-in-from-bottom-8 duration-700">
-                <div className="flex justify-end mb-4 pr-2">
-                  <button
-                    onClick={async () => {
-                      setIsExportingPDF(true);
-                      await new Promise(r => setTimeout(r, 100));
-                      try {
-                        const dateStr = format(new Date(), 'yyyyMMdd_HHmm');
-                        await exportToPDF('enhanced-results-container', `強化掃描結果_${dateStr}.pdf`);
-                      } finally {
-                        setIsExportingPDF(false);
-                      }
-                    }}
-                    disabled={isExportingPDF}
-                    className="inline-flex items-center gap-2 px-4 py-2 bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 border border-purple-500/30 rounded-xl transition-all font-black text-sm disabled:opacity-50"
-                  >
-                    {isExportingPDF ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-                    {isExportingPDF ? '生成中...' : '匯出為 PDF'}
-                  </button>
-                </div>
-                <div id="enhanced-results-container" className="grid grid-cols-1 gap-10 bg-slate-950 p-[2px] rounded-[3rem]">
-                  {filteredEnhancedResults.map((stock, index) => (
-                    <div key={stock.stock_id} onClick={() => router.push(`/stock/${stock.stock_id}`)}>
-                      <StockCard data={stock} index={index + 1} />
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-          </>
+              ))}
+            </div>
+          </div>
         )}
       </div>
 
@@ -1757,38 +1518,6 @@ export default function DashboardPage() {
                   {isExportingPDF ? '生成中...' : '匯出報表'}
                 </button>
               )}
-            </div>
-
-            {/* ── 掃描模式選擇器（回測資料來源） ── */}
-            <div className="bg-black/30 rounded-[2rem] p-6 border border-white/5 mb-6 flex items-center justify-between">
-              <div>
-                <span className="text-lg font-black text-slate-300">資料來源模式</span>
-                <span className="text-xs font-bold text-slate-500 ml-2">（獨立對比兩種模式的勝率）</span>
-              </div>
-              <div className="flex bg-slate-900 rounded-xl p-1 border border-white/10">
-                <button
-                  onClick={() => setBacktestScanMode('original')}
-                  className={clsx(
-                    "px-6 py-2 rounded-lg font-black transition-all",
-                    backtestScanMode === 'original' 
-                      ? "bg-blue-500/20 text-blue-400 border border-blue-500/50" 
-                      : "text-slate-500 hover:text-slate-300"
-                  )}
-                >
-                  🔥 原始共振掃描
-                </button>
-                <button
-                  onClick={() => setBacktestScanMode('enhanced')}
-                  className={clsx(
-                    "px-6 py-2 rounded-lg font-black transition-all",
-                    backtestScanMode === 'enhanced' 
-                      ? "bg-purple-500/20 text-purple-400 border border-purple-500/50" 
-                      : "text-slate-500 hover:text-slate-300"
-                  )}
-                >
-                  ⚡ 強化評分掃描
-                </button>
-              </div>
             </div>
 
             {/* ── Backtest Date Picker ── */}

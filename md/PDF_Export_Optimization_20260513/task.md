@@ -1,0 +1,4 @@
+- [x] 備份目前的 `src/lib/pdfUtils.ts`
+- [x] 修改 `src/lib/pdfUtils.ts` 實現分段截圖 (Segmented Capture)
+- [x] 驗證長報告匯出穩定性 (代碼邏輯確認)
+- [/] 推送至 GitHub

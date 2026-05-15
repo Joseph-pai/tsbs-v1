@@ -7,7 +7,7 @@ export const revalidate = 0;
 
 export async function POST(req: Request) {
     try {
-        const { stocks, settings, enhanced } = await req.json(); // stocks: { id, name }[]
+        const { stocks, settings } = await req.json(); // stocks: { id, name }[]
 
         if (!Array.isArray(stocks) || stocks.length === 0) {
             return NextResponse.json({ success: false, error: 'Empty stock list' }, { status: 400 });
@@ -45,7 +45,7 @@ export async function POST(req: Request) {
             const batch = stocks.slice(i, i + batchSize);
             const batchResults = await Promise.allSettled(
                 batch.map(async (stock: { id: string, name: string }) => {
-                    return await ScannerService.analyzeStock(stock.id, settings, stock.name, mapping, indexData, enhanced);
+                    return await ScannerService.analyzeStock(stock.id, settings, stock.name, mapping, indexData);
                 })
             );
 

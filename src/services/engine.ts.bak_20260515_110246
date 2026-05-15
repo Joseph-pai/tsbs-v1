@@ -97,7 +97,6 @@ export function checkMarginSqueezeSignal(
 
 /**
  * Evaluate Stock Base Logic
- * @param enhanced 強化評分模式：啟用後會計算股價位階並對低位爆量股加權
  */
 import { CONFIG } from '@/lib/config';
 
@@ -105,8 +104,7 @@ export function evaluateStock(
     history: any[], 
     settings?: { volumeWeight?: number, maWeight?: number, breakoutWeight?: number, rsWeight?: number },
     indexData?: { TAIEX: any[], TPEX: any[] },
-    market?: 'TWSE' | 'TPEX',
-    enhanced?: boolean
+    market?: 'TWSE' | 'TPEX'
 ) {
     // 需有 60 天以上資料才能算 60 日新高，但為了容錯，至少給 20 天基準
     if (history.length < 20) return null;
@@ -197,36 +195,9 @@ export function evaluateStock(
         }
     }
 
-    const basePoints = volumeScore + maScore + breakoutScore + rsScore;
-
-    // --- 5. 強化模式：股價位階乘數 ---
-    // 低位爆量有更大的上漲空間，給予額外加權
-    let finalPoints = basePoints;
-    let positionRatio = 0.5; // 預設中性值
-
-    if (enhanced) {
-        const recent60Closes = closes.slice(-lookbackDays);
-        const min60 = Math.min(...recent60Closes);
-        const max60Price = Math.max(...recent60Closes);
-
-        if (max60Price > min60) {
-            positionRatio = (today.close - min60) / (max60Price - min60);
-        }
-
-        // 位階乘數：低位加分，高位保持不變（不懲罰強勢股）
-        // 低位（<30%）: ×1.25 → 上漲空間大，同樣的技術信號更有說服力
-        // 中位（30~60%）: ×1.10 → 主升段，輕微加分
-        // 高位（>60%）: ×1.00 → 不調整，保持客觀
-        const positionMultiplier =
-            positionRatio < 0.30 ? 1.25 :
-            positionRatio < 0.60 ? 1.10 :
-            1.00;
-
-        finalPoints = basePoints * positionMultiplier;
-    }
-
-    const isQualified = finalPoints >= 70; // 門檻: 綜合權重分數需 >= 70分 且具備流動性底線
-    const score = Math.min(1, Math.max(0, finalPoints / 100));
+    const totalPoints = volumeScore + maScore + breakoutScore + rsScore;
+    const isQualified = totalPoints >= 70; // 門檻: 綜合權重分數需 >= 70分 且具備流動性底線
+    const score = Math.min(1, Math.max(0, totalPoints / 100));
 
     return {
         vRatio,
@@ -242,7 +213,7 @@ export function evaluateStock(
             maScore: parseFloat(maScore.toFixed(2)),
             chipScore: parseFloat(breakoutScore.toFixed(2)), // Repurposed for breakout score tracking
             rsScore: parseFloat(rsScore.toFixed(2)),
-            total: parseFloat(finalPoints.toFixed(2)),
+            total: parseFloat(totalPoints.toFixed(2)),
             note: 'engine_resonance_scores' as const
         }
     };
