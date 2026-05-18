@@ -32,6 +32,10 @@ interface BacktestResult {
   achievedDays: number | null;
   success: boolean;
   gainPercent: number | null;
+  hitRecords?: { date: string; high: number }[];
+  score?: number;
+  flags?: any;
+  message?: string;
 }
 
 type ScanStage = 'idle' | 'fetching' | 'filtering' | 'analyzing' | 'complete';
@@ -232,6 +236,8 @@ export default function DashboardPage() {
       sector_name?: string;
       scanPrice: number;
       fromDate: string;
+      score: number;
+      flags: any;
     }>();
 
     scanHistoryToUse.forEach(session => {
@@ -266,6 +272,9 @@ export default function DashboardPage() {
         const existing = earliestScanMap.get(r.stock_id);
         // 保留 fromDate 最早的那一筆，讓基準價格為首次掃描當日收盤價
         if (!existing || fromDate < existing.fromDate) {
+          const rawScore = r.potential_score || r.comprehensiveScoreDetails?.total || r.score || 0;
+          const displayScore = Math.round(rawScore > 2 ? rawScore : rawScore * 100);
+
           earliestScanMap.set(r.stock_id, {
             sessionId: sessionIdStr,
             sessionDate: sessionDateStr,
@@ -273,7 +282,17 @@ export default function DashboardPage() {
             stock_name: r.stock_name,
             sector_name: r.sector_name || session.sector,
             scanPrice: r.close,
-            fromDate
+            fromDate,
+            score: displayScore,
+            flags: {
+              v_ratio: r.v_ratio || 0,
+              is_ma_breakout: !!r.is_ma_breakout,
+              is_ma_aligned: !!r.is_ma_aligned,
+              consecutive_buy: r.consecutive_buy || 0,
+              is_bullish: !!r.is_bullish,
+              marginSqueezeSignal: !!r.marginSqueezeSignal,
+              isRevenueNewHigh: !!r.isRevenueNewHigh
+            }
           });
         }
       });
@@ -338,6 +357,8 @@ export default function DashboardPage() {
             peakDate: data.peakDate ?? null,
             achievedDays: data.achievedDays ?? null,
             hitRecords: data.hitRecords || [],
+            score: task.score,
+            flags: task.flags,
             success,
             gainPercent,
             message: data.message
@@ -2006,11 +2027,20 @@ export default function DashboardPage() {
                       <div className="space-y-3">
                         {successList.map((r, i) => (
                           <div key={`s-${i}`} className="flex items-center justify-between p-5 bg-emerald-500/5 border border-emerald-500/20 rounded-2xl">
-                            <div>
+                            <div className="flex-1 pr-4">
                               <div className="flex items-center gap-3 flex-wrap">
                                 <span className="text-xl font-black text-white">{r.stock_id}</span>
                                 <span className="text-sm font-bold text-slate-400">{r.stock_name}</span>
                                 {r.sector_name && <span className="px-2 py-0.5 rounded-md bg-slate-800 border border-white/5 text-xs font-bold text-slate-500">{r.sector_name}</span>}
+                                {r.score != null && (
+                                  <span className={clsx("px-2 py-0.5 rounded-md border font-black text-xs", r.score >= 80 ? "border-amber-500/50 text-amber-400 bg-amber-500/10" : "border-blue-500/50 text-blue-400 bg-blue-500/10")}>
+                                    評分: {r.score}
+                                  </span>
+                                )}
+                                {r.flags?.v_ratio > 2 && <span className="px-2 py-0.5 rounded-md bg-rose-500/10 border border-rose-500/30 text-[10px] font-black text-rose-400">量能激增{r.flags.v_ratio.toFixed(1)}x</span>}
+                                {r.flags?.is_ma_breakout && <span className="px-2 py-0.5 rounded-md bg-blue-500/10 border border-blue-500/30 text-[10px] font-black text-blue-400">帶量突破</span>}
+                                {r.flags?.marginSqueezeSignal && <span className="px-2 py-0.5 rounded-md bg-amber-500/10 border border-amber-500/30 text-[10px] font-black text-amber-400">融資軋空</span>}
+                                {r.flags?.isRevenueNewHigh && <span className="px-2 py-0.5 rounded-md bg-purple-500/10 border border-purple-500/30 text-[10px] font-black text-purple-400">營收新高</span>}
                               </div>
                               <div className="text-xs font-bold text-slate-500 mt-1">
                                 <span className="text-emerald-400/70">掃描</span> {r.sessionDate}{' '}｜{' '}
@@ -2018,6 +2048,20 @@ export default function DashboardPage() {
                                 <span className="mx-1 text-slate-600">·</span>
                                 現價 ${r.scanPrice} → 目標 ${r.targetPrice.toFixed(1)}
                               </div>
+                              {r.hitRecords && r.hitRecords.length > 0 && (
+                                <div className="mt-3 pt-3 border-t border-emerald-500/20">
+                                  <div className="text-[10px] font-bold text-emerald-400/80 mb-1.5 flex items-center gap-1">
+                                    <Sparkles className="w-3 h-3" /> 達標軌跡 (最高價 ≥ ${r.targetPrice.toFixed(1)})
+                                  </div>
+                                  <div className="flex flex-wrap gap-2">
+                                    {r.hitRecords.map((hit, hi) => (
+                                      <div key={hi} className="px-2 py-1 bg-emerald-500/10 border border-emerald-500/20 rounded text-[10px] font-black text-emerald-300">
+                                        {hit.date} | <span className="text-white">${hit.high.toFixed(1)}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
                             </div>
                             <div className="text-right flex-shrink-0 ml-4">
                               <div className="text-2xl font-black text-emerald-400">+{r.gainPercent}%</div>
@@ -2039,10 +2083,19 @@ export default function DashboardPage() {
                       <div className="space-y-2">
                         {failList.map((r, i) => (
                           <div key={`f-${i}`} className="flex items-center justify-between p-4 bg-rose-500/5 border border-rose-500/10 rounded-2xl">
-                            <div>
-                              <div className="flex items-center gap-3">
+                            <div className="flex-1 pr-4">
+                              <div className="flex items-center gap-3 flex-wrap">
                                 <span className="text-lg font-black text-white">{r.stock_id}</span>
                                 <span className="text-sm font-bold text-slate-400">{r.stock_name}</span>
+                                {r.score != null && (
+                                  <span className={clsx("px-2 py-0.5 rounded-md border font-black text-xs", r.score >= 80 ? "border-amber-500/50 text-amber-400 bg-amber-500/10" : "border-blue-500/50 text-blue-400 bg-blue-500/10")}>
+                                    評分: {r.score}
+                                  </span>
+                                )}
+                                {r.flags?.v_ratio > 2 && <span className="px-2 py-0.5 rounded-md bg-rose-500/10 border border-rose-500/30 text-[10px] font-black text-rose-400">量能激增{r.flags.v_ratio.toFixed(1)}x</span>}
+                                {r.flags?.is_ma_breakout && <span className="px-2 py-0.5 rounded-md bg-blue-500/10 border border-blue-500/30 text-[10px] font-black text-blue-400">帶量突破</span>}
+                                {r.flags?.marginSqueezeSignal && <span className="px-2 py-0.5 rounded-md bg-amber-500/10 border border-amber-500/30 text-[10px] font-black text-amber-400">融資軋空</span>}
+                                {r.flags?.isRevenueNewHigh && <span className="px-2 py-0.5 rounded-md bg-purple-500/10 border border-purple-500/30 text-[10px] font-black text-purple-400">營收新高</span>}
                               </div>
                               <div className="text-xs font-bold text-slate-500 mt-0.5">
                                 <span className="text-amber-400/70">掃描</span> {r.sessionDate}{' '}｜{' '}
