@@ -72,9 +72,10 @@ export async function GET(request: Request) {
             if (institutionalData && institutionalData.length >= 2) {
                 // TaiwanStockHoldingSharesPer data usually has 'HoldingSharesLevel': 15 for >1000 shares
                 // But structure might be a flat list of dates and levels. Let's group by date.
-                const lastTwoWeeks = institutionalData.filter((d: any) => parseInt(d.HoldingSharesLevel, 10) === 15);
+                const instDataAny = institutionalData as any[];
+                const lastTwoWeeks = instDataAny.filter(d => parseInt(d.HoldingSharesLevel, 10) === 15);
                 if (lastTwoWeeks.length >= 2) {
-                    const sorted = lastTwoWeeks.sort((a: any, b: any) => a.date.localeCompare(b.date));
+                    const sorted = lastTwoWeeks.sort((a, b) => a.date.localeCompare(b.date));
                     const latest = sorted[sorted.length - 1].percent;
                     const prev = sorted[sorted.length - 2].percent;
                     if (latest < prev - 0.5) { // Dropped by more than 0.5% in a week
