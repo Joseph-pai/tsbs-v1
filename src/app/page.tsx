@@ -239,6 +239,8 @@ export default function DashboardPage() {
       scanPrice: number;
       fromDate: string;
       score: number;
+      win_rate_score?: number;
+      explosive_score?: number;
       flags: any;
     }>();
 
