@@ -34,6 +34,8 @@ interface BacktestResult {
   gainPercent: number | null;
   hitRecords?: { date: string; high: number }[];
   score?: number;
+  win_rate_score?: number;
+  explosive_score?: number;
   flags?: any;
   message?: string;
 }
@@ -284,6 +286,8 @@ export default function DashboardPage() {
             scanPrice: r.close,
             fromDate,
             score: displayScore,
+            win_rate_score: r.win_rate_score,
+            explosive_score: r.explosive_score,
             flags: {
               v_ratio: r.v_ratio || 0,
               is_ma_breakout: !!r.is_ma_breakout,
@@ -2032,7 +2036,17 @@ export default function DashboardPage() {
                                 <span className="text-xl font-black text-white">{r.stock_id}</span>
                                 <span className="text-sm font-bold text-slate-400">{r.stock_name}</span>
                                 {r.sector_name && <span className="px-2 py-0.5 rounded-md bg-slate-800 border border-white/5 text-xs font-bold text-slate-500">{r.sector_name}</span>}
-                                {r.score != null && (
+                                {r.win_rate_score != null && (
+                                  <span className="px-2 py-0.5 rounded-md border font-black text-xs border-blue-500/50 text-blue-400 bg-blue-500/10" title="勝率分數">
+                                    勝率: {Math.round(r.win_rate_score)}
+                                  </span>
+                                )}
+                                {r.explosive_score != null && (
+                                  <span className="px-2 py-0.5 rounded-md border font-black text-xs border-amber-500/50 text-amber-400 bg-amber-500/10" title="爆發力分數">
+                                    爆發: {Math.round(r.explosive_score)}
+                                  </span>
+                                )}
+                                {(r.win_rate_score == null && r.explosive_score == null) && r.score != null && (
                                   <span className={clsx("px-2 py-0.5 rounded-md border font-black text-xs", r.score >= 80 ? "border-amber-500/50 text-amber-400 bg-amber-500/10" : "border-blue-500/50 text-blue-400 bg-blue-500/10")}>
                                     評分: {r.score}
                                   </span>
@@ -2087,7 +2101,17 @@ export default function DashboardPage() {
                               <div className="flex items-center gap-3 flex-wrap">
                                 <span className="text-lg font-black text-white">{r.stock_id}</span>
                                 <span className="text-sm font-bold text-slate-400">{r.stock_name}</span>
-                                {r.score != null && (
+                                {r.win_rate_score != null && (
+                                  <span className="px-2 py-0.5 rounded-md border font-black text-xs border-blue-500/50 text-blue-400 bg-blue-500/10" title="勝率分數">
+                                    勝率: {Math.round(r.win_rate_score)}
+                                  </span>
+                                )}
+                                {r.explosive_score != null && (
+                                  <span className="px-2 py-0.5 rounded-md border font-black text-xs border-amber-500/50 text-amber-400 bg-amber-500/10" title="爆發力分數">
+                                    爆發: {Math.round(r.explosive_score)}
+                                  </span>
+                                )}
+                                {(r.win_rate_score == null && r.explosive_score == null) && r.score != null && (
                                   <span className={clsx("px-2 py-0.5 rounded-md border font-black text-xs", r.score >= 80 ? "border-amber-500/50 text-amber-400 bg-amber-500/10" : "border-blue-500/50 text-blue-400 bg-blue-500/10")}>
                                     評分: {r.score}
                                   </span>
