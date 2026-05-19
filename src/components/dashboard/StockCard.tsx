@@ -122,12 +122,28 @@ export const StockCard: React.FC<StockCardProps> = ({ data, index, onClick }) =>
                     )}>
                         {isPositive ? '▲' : '▼'} {(data.change_percent * 100).toFixed(2)}%
                     </div>
-                    {data.potential_score != null && (
-                        <div className="mt-2 flex items-center gap-1.5 bg-blue-500/10 border border-blue-500/30 rounded-lg px-3 py-1">
-                            <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">評分</span>
-                            <span className="text-base font-black font-mono text-blue-400">{Math.round(data.potential_score)}</span>
+                    <div className="mt-2 flex items-center gap-2">
+                        {/* Win Rate Score Badge */}
+                        <div 
+                            className="group/badge relative flex items-center gap-1.5 bg-blue-500/10 border border-blue-500/30 rounded-lg px-3 py-1 cursor-help"
+                            title="【勝率分數】&#10;主要計算：量能倍數、均線糾結度、突破幅度與相對強弱。&#10;判斷方式：分數越高代表技術面剛轉強，未來上漲機率較大。"
+                        >
+                            <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">勝率</span>
+                            <span className="text-base font-black font-mono text-blue-400">
+                                {Math.round(data.win_rate_score ?? ((data.score || 0) * 100))}
+                            </span>
                         </div>
-                    )}
+                        {/* Explosive Score Badge */}
+                        <div 
+                            className="group/badge relative flex items-center gap-1.5 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-1 cursor-help"
+                            title="【爆發力分數】&#10;主要計算：勝率分數加權股性波動率，並扣除高位階風險與長上影線拋壓。&#10;判斷方式：分數越高代表該股漲幅潛力大，容易出現波段大行情。"
+                        >
+                            <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">爆發力</span>
+                            <span className="text-base font-black font-mono text-amber-400">
+                                {Math.round(data.explosive_score ?? (data.potential_score || data.comprehensiveScoreDetails?.total || ((data.score || 0) * 100)))}
+                            </span>
+                        </div>
+                    </div>
                 </div>
             </div>
 

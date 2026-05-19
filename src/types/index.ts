@@ -91,6 +91,8 @@ export interface AnalysisResult {
     marginTrend?: 'increasing' | 'stable' | 'decreasing';
     isGapUp?: boolean;            // 跳空缺口
     isRevenueNewHigh?: boolean;   // 營收創近期新高
+    win_rate_score?: number;     // 勝率分數 (0-100)
+    explosive_score?: number;    // 爆發力分數 (0-100+)
 }
 
 export interface StockCandle {

@@ -199,10 +199,25 @@ export function evaluateStock(
 
     const basePoints = volumeScore + maScore + breakoutScore + rsScore;
 
-    // --- 5. 強化模式：股價位階乘數 ---
-    // 低位爆量有更大的上漲空間，給予額外加權
+    // --- 5. 強化模式：股價位階與動態乘數 ---
     let finalPoints = basePoints;
     let positionRatio = 0.5; // 預設中性值
+
+    // 提前計算波動率與上影線 (供強化模式使用)
+    const recent20ForVol = history.slice(-20);
+    let totalVolatility = 0;
+    for (const h of recent20ForVol) {
+        if (h.close > 0) {
+            totalVolatility += (h.max - h.min) / h.close;
+        }
+    }
+    const avgVolatility = recent20ForVol.length > 0 ? totalVolatility / recent20ForVol.length : 0;
+
+    const openPrice = today.open !== undefined ? today.open : prevClose;
+    const bodyMax = Math.max(openPrice, today.close);
+    const upperShadow = today.max - bodyMax;
+    const body = Math.abs(today.close - openPrice);
+    const hasLongUpperShadow = upperShadow > body && upperShadow > (today.close * 0.015);
 
     if (enhanced) {
         const recent60Closes = closes.slice(-lookbackDays);
@@ -213,16 +228,26 @@ export function evaluateStock(
             positionRatio = (today.close - min60) / (max60Price - min60);
         }
 
-        // 位階乘數：低位加分，高位保持不變（不懲罰強勢股）
-        // 低位（<30%）: ×1.25 → 上漲空間大，同樣的技術信號更有說服力
-        // 中位（30~60%）: ×1.10 → 主升段，輕微加分
-        // 高位（>60%）: ×1.00 → 不調整，保持客觀
+        // 位階乘數：低位加分，高位(>85%)懲罰
         const positionMultiplier =
             positionRatio < 0.30 ? 1.25 :
             positionRatio < 0.60 ? 1.10 :
-            1.00;
+            positionRatio < 0.85 ? 1.00 :
+            0.85;
 
         finalPoints = basePoints * positionMultiplier;
+
+        // 股性波動率乘數
+        if (avgVolatility > 0.035) {
+            finalPoints *= 1.15; // 活潑股加分
+        } else if (avgVolatility < 0.015) {
+            finalPoints *= 0.85; // 牛皮股降分
+        }
+
+        // 長上影線扣分
+        if (hasLongUpperShadow) {
+            finalPoints -= 15;
+        }
     }
 
     const isQualified = finalPoints >= 70; // 門檻: 綜合權重分數需 >= 70分 且具備流動性底線
@@ -237,6 +262,8 @@ export function evaluateStock(
         isBreakout: isBreakout || isExtension,
         isQualified,
         score,
+        win_rate_score: basePoints,
+        explosive_score: finalPoints,
         comprehensiveScoreDetails: {
             volumeScore: parseFloat(volumeScore.toFixed(2)),
             maScore: parseFloat(maScore.toFixed(2)),

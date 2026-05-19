@@ -512,14 +512,17 @@ export const ScannerService = {
                     revenueBonusPoints >= 6  ? 10 :  // 中成長
                     revenueBonusPoints >= 2  ? 5  :  // 低成長
                     0;
-                // 法人、融資加分上限降至 10 分（把空間讓給月營收）
-                bonus = Math.min((instScore / 30) * 7 + (marginScore / 11) * 3, 10) + enhancedRevenueBonus;
+                // 強化版：法人(投信連買)權重提升，反映大資金保護的作用
+                bonus = Math.min((instScore / 30) * 12 + (marginScore / 11) * 3, 15) + enhancedRevenueBonus;
             } else {
                 // 原始模式：維持原有邏輯不變
                 bonus = Math.min((instScore / 30) * 10 + (marginScore / 11) * 5 + (revenueBonusPoints / 13) * 5, 20);
             }
             
             const finalScore = Math.min(1, Math.max(0, (baseResonanceScore + bonus) / 100));
+            
+            const finalWinRateScore = Math.min(100, Math.max(0, (result.win_rate_score || 0) + bonus));
+            const finalExplosiveScore = Math.min(100, Math.max(0, (result.explosive_score || 0) + bonus));
 
             // 更新 comprehensiveScoreDetails 使其反映真實使用的分數, 以利前端 UI 讀取 (前端直接取 total 顯示)
             engineDetails.total = baseResonanceScore + bonus;
@@ -546,6 +549,8 @@ export const ScannerService = {
                 close: today.close,
                 change_percent: result.changePercent,
                 score: finalScore,
+                win_rate_score: finalWinRateScore,
+                explosive_score: finalExplosiveScore,
                 v_ratio: result.vRatio,
                 is_ma_aligned: result.maData.isSqueezing,
                 is_ma_breakout: result.isBreakout,
