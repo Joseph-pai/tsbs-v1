@@ -360,11 +360,7 @@ export async function GET(request: Request) {
             }
         }
 
-        // Prices
-        const buyPrice = Number(((latestHigh + latestLow) / 2).toFixed(2));
-        const stopLossPrice = Number((ma20 || latestLow).toFixed(2));
-        const tp1Price = Number((buyPrice * 1.25).toFixed(2));
-        const tp2Price = Number((buyPrice * 1.50).toFixed(2));
+        // Prices will be dynamically calculated below after rules are evaluated
 
         // Logic Status
         let signalTag: string | null = null;
@@ -533,6 +529,50 @@ export async function GET(request: Request) {
             rules.push(`(因缺少總股本資料，使用5日均量比對換手熱度)`);
         }
 
+        // === 動態操作價格計算 (Dynamic Pricing) ===
+        let displayBuyPrice: string | number = '觀望';
+        let displayStopLoss: string | number = '--';
+        let displayTp1: string | number = '觀望';
+        let displayTp2: string | number = '觀望';
+
+        if (light === 'red' || distributionLevel === 'alert' || distributionLevel === 'warning') {
+            // 紅燈或出貨中，封鎖買點，防止散戶高位接刀
+            displayBuyPrice = '觀望/避開';
+            displayStopLoss = Number((ma20 || latestLow).toFixed(2)); // 已持股者維持停損線
+            displayTp1 = '伺機停利';
+            displayTp2 = '伺機停利';
+        } else {
+            // 綠燈或黃燈：根據型態給予實戰操作價
+            let baseBuyPrice = (latestHigh + latestLow) / 2;
+            let baseStopLoss = ma20 || latestLow;
+            
+            // 基礎波幅 (用來算等距停利)
+            const atr = prices.length >= 10 ? 
+                prices.slice(-10).reduce((sum, p) => sum + (p.max - p.min), 0) / 10 : 
+                (latestHigh - latestLow || latestClose * 0.05);
+
+            if (isWyckoffSpring) {
+                // 破底翻：買價在收盤附近，嚴格停損設於下影線低點
+                baseBuyPrice = latestClose;
+                baseStopLoss = latestLow;
+            } else if (isVcpSqueeze) {
+                // VCP收斂：買在突破近5日高點，停損設於近5日低點
+                const recent5High = Math.max(...prices.slice(-5).map(p => p.max));
+                const recent5Low = Math.min(...prices.slice(-5).map(p => p.min));
+                baseBuyPrice = recent5High;
+                baseStopLoss = recent5Low;
+            } else {
+                // 預設多頭：若乖離過大，買價設於 5MA
+                baseBuyPrice = ma5 ? Math.min(latestClose, ma5) : latestClose;
+            }
+
+            displayBuyPrice = Number(baseBuyPrice.toFixed(2));
+            displayStopLoss = Number(baseStopLoss.toFixed(2));
+            // 停利抓 3倍 與 6倍 波幅 (短中線)
+            displayTp1 = Number((baseBuyPrice + atr * 3).toFixed(2));
+            displayTp2 = Number((baseBuyPrice + atr * 6).toFixed(2));
+        }
+
         return NextResponse.json({
             success: true,
             data: {
@@ -541,10 +581,10 @@ export async function GET(request: Request) {
                 light,
                 signalTag,
                 prices: {
-                    buy: buyPrice,
-                    stopLoss: stopLossPrice,
-                    tp1: tp1Price,
-                    tp2: tp2Price,
+                    buy: displayBuyPrice,
+                    stopLoss: displayStopLoss,
+                    tp1: displayTp1,
+                    tp2: displayTp2,
                 },
                 metrics: {
                     close: latestClose,
