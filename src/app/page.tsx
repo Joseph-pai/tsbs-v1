@@ -621,6 +621,7 @@ export default function DashboardPage() {
           market,
           sector: currentSectorName,
           settings,
+          scanMode: 'original',
           results: filteredResults.map(r => ({
             ...r,
             // Capture specific values at scan time
@@ -759,6 +760,22 @@ export default function DashboardPage() {
           scanMode: 'enhanced',
           data: filteredEnhanced.map(r => ({ ...r, score: r.potential_score }))
         }, conditionDesc).catch(console.error);
+
+        // 同步更新本地歷史紀錄狀態，讓畫面立即顯示
+        const newSession: HistorySession = {
+          id: new Date().toISOString(),
+          date: new Date().toLocaleTimeString(),
+          scanDate: format(new Date(), 'yyyy-MM-dd'),
+          market,
+          sector: currentSectorName,
+          settings,
+          scanMode: 'enhanced',
+          results: filteredEnhanced.map(r => ({ ...r, potential_score: r.potential_score || r.score }))
+        };
+
+        setHistoryRecords((prev: HistorySession[]) => {
+          return [newSession, ...prev].slice(0, 50); // 保留最近 50 筆
+        });
       }
 
       setEnhancedProgress({

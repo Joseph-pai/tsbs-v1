@@ -117,5 +117,6 @@ export interface HistorySession {
         breakoutWeight: number;
         rsWeight: number;
     };
+    scanMode?: 'original' | 'enhanced';
     results: AnalysisResult[];
 }
