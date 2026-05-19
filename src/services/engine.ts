@@ -248,6 +248,71 @@ export function evaluateStock(
         if (hasLongUpperShadow) {
             finalPoints -= 15;
         }
+
+        // === 主力進場特徵 (Smart Money Footprints) 評分加成 ===
+        
+        // 1. 紅黑K量能結構比 (Accumulation Volume Ratio)
+        let isAccumulationVolume = false;
+        if (history.length >= 10) {
+            const recent10 = history.slice(-10);
+            let upVolume = 0;
+            let downVolume = 0;
+            for (let i = 1; i < recent10.length; i++) {
+                const p = recent10[i];
+                const pPrev = recent10[i - 1];
+                if (p.close > pPrev.close || p.close > p.open) {
+                    upVolume += p.Trading_Volume;
+                } else if (p.close < pPrev.close || p.close < p.open) {
+                    downVolume += p.Trading_Volume;
+                }
+            }
+            if (upVolume / (downVolume || 1) > 1.5) {
+                isAccumulationVolume = true;
+                finalPoints += 10; // 量能結構佳，爆發力加分
+            }
+        }
+
+        // 2. VCP 波動率收斂 (Volatility Contraction)
+        let isVcpSqueeze = false;
+        if (history.length >= 20) {
+            const getAtr = (pSlice: any[]) => pSlice.reduce((sum, p) => sum + ((p.max - p.min) / p.close), 0) / pSlice.length;
+            const recent5Atr = getAtr(history.slice(-5));
+            const recent20Atr = getAtr(history.slice(-20));
+            const vol5Avg = volumes.slice(-5).reduce((a, b) => a + b, 0) / 5;
+            const vol20Avg = volumes.slice(-20).reduce((a, b) => a + b, 0) / 20;
+            if (recent5Atr < (recent20Atr * 0.5) && vol5Avg < vol20Avg) {
+                isVcpSqueeze = true;
+                finalPoints += 10; // 籌碼鎖定窒息量，爆發力加分
+            }
+        }
+
+        // 3. 威科夫破底翻洗盤 (Wyckoff Spring)
+        let isWyckoffSpring = false;
+        if (positionRatio < 0.35) {
+            const lowerShadow = Math.min(today.close, openPrice) - today.min;
+            isWyckoffSpring = body > 0 
+                ? lowerShadow > body * 2
+                : lowerShadow > today.close * 0.015;
+            const vol20Avg = volumes.slice(-20).reduce((a, b) => a + b, 0) / 20;
+            if (isWyckoffSpring && today.Trading_Volume < vol20Avg * 3) {
+                finalPoints += 5; // 故意洗盤洗出浮額，爆發力加分
+            }
+        }
+        
+        // 4. 築底天數 (Base Building Duration)
+        let hasBaseBuilding = false;
+        if (history.length >= 15 && lookbackDays >= 60) {
+            const recent15 = history.slice(-15);
+            let lowDays = 0;
+            for (const p of recent15) {
+                const pos = max60Price > min60 ? (p.close - min60) / (max60Price - min60) : 0;
+                if (pos < 0.35) lowDays++;
+            }
+            if (lowDays >= 10) {
+                hasBaseBuilding = true;
+                if (isAccumulationVolume) finalPoints += 5; // 築底且伴隨吸籌，再給予穩定獎勵
+            }
+        }
     }
 
     const isQualified = finalPoints >= 70; // 門檻: 綜合權重分數需 >= 70分 且具備流動性底線

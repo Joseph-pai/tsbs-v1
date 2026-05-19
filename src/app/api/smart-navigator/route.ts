@@ -265,6 +265,62 @@ export async function GET(request: Request) {
         }
         // 低/中位（<=60%）：主力不在出貨區，一律標記為 safe
 
+        // === 新增：主力進場四大特徵 (Smart Money Footprints) ===
+        // 特徵 1: 紅黑K量能結構比 (Accumulation Volume Ratio)
+        let accumulationVolumeRatio = 1;
+        let isAccumulationVolume = false;
+        if (prices.length >= 10) {
+            const recent10 = prices.slice(-10);
+            let upVolume = 0;
+            let downVolume = 0;
+            for (let i = 1; i < recent10.length; i++) {
+                const p = recent10[i];
+                const prevClose = recent10[i - 1].close;
+                if (p.close > prevClose || p.close > p.open) {
+                    upVolume += p.Trading_Volume;
+                } else if (p.close < prevClose || p.close < p.open) {
+                    downVolume += p.Trading_Volume;
+                }
+            }
+            accumulationVolumeRatio = upVolume / (downVolume || 1);
+            isAccumulationVolume = accumulationVolumeRatio > 1.5;
+        }
+
+        // 特徵 2: VCP 波動率收斂 (Volatility Contraction)
+        let isVcpSqueeze = false;
+        if (prices.length >= 20) {
+            const getAtr = (pSlice: any[]) => pSlice.reduce((sum, p) => sum + ((p.max - p.min) / p.close), 0) / pSlice.length;
+            const recent5Atr = getAtr(prices.slice(-5));
+            const recent20Atr = getAtr(prices.slice(-20));
+            isVcpSqueeze = recent5Atr < (recent20Atr * 0.5) && isShrinkingTurnover;
+        }
+
+        // 特徵 3: 威科夫破底翻洗盤 (Wyckoff Spring)
+        let isWyckoffSpring = false;
+        if (positionPercent < 35) {
+            const latestBodyMax = Math.max(latestClose, latestOpen);
+            const latestBodyMin = Math.min(latestClose, latestOpen);
+            const lowerShadow = latestBodyMin - latestLow;
+            const latestBody = latestBodyMax - latestBodyMin;
+            isWyckoffSpring = latestBody > 0 
+                ? (lowerShadow > latestBody * 2 && !isExtremelyHighTurnover)
+                : (lowerShadow > latestClose * 0.015 && !isExtremelyHighTurnover);
+        }
+
+        // 特徵 4: 築底天數 (Base Building Duration)
+        let baseBuildingDays = 0;
+        let hasBaseBuilding = false;
+        if (prices.length >= 15) {
+            const recent15 = prices.slice(-15);
+            for (const p of recent15) {
+                const pos = periodMax === periodMin ? 0 : ((p.close - periodMin) / (periodMax - periodMin)) * 100;
+                if (pos < 35) {
+                    baseBuildingDays++;
+                }
+            }
+            hasBaseBuilding = baseBuildingDays >= 10;
+        }
+
         // === Early Accumulation Signals ===
         // Moderate volume: turnover 1.2x ~ 2x avg (warming up, not yet high)
         const isModerateVolume = avg20Turnover > 0
@@ -328,45 +384,57 @@ export async function GET(request: Request) {
         }
 
         // Rule: Five Signal Detection (Position + Turnover relationship)
-        if (positionPercent < 30) {
+        if (positionPercent < 35) {
             // Low position zone
-            rules.push(`目前股價處於近 ${period} 日相對低位（<30%）。`);
-            if (isHighTurnover) {
+            rules.push(`目前股價處於近 ${period} 日相對低位（<35%）。`);
+
+            if (hasBaseBuilding && isAccumulationVolume && isVcpSqueeze) {
+                light = 'green';
+                signalTag = '🚀 絕佳擊球點 (主力控盤)';
+                rules.push('【極強烈訊號】股價在低檔經過長時間築底（10天以上），上漲紅K量能明顯大於黑K（主力持續吃貨），且近5日波動率極致收斂（籌碼被徹底鎖定）。這代表主力已完美控盤，隨時可能迎來主升段爆發！建議：積極建倉，停損設於盤整區低點。');
+            } else if (isWyckoffSpring) {
+                light = 'green';
+                signalTag = '破底翻洗盤 (Wyckoff Spring)';
+                rules.push('低位出現長下影線的「破底翻」洗盤訊號！主力故意砸破重要支撐引發散戶停損，隨即在低檔將籌碼全數吸收並拉回。這是極具攻擊性的底部確認訊號。建議：可分批試單，以該根下影線最低點作為嚴格停損。');
+            } else if (hasBaseBuilding && isAccumulationVolume) {
+                light = 'green';
+                signalTag = '隱蔽吸籌 (慢牛築底)';
+                rules.push('股價在低檔已橫盤超過 10 天，且期間「紅K放量、黑K縮量」的結構非常明顯（量能比>1.5）。這顯示主力非常有耐心，正利用盤整溫和吸籌。爆發前可能毫無波瀾，但一旦發動漲勢通常穩健綿長。建議：可分批佈局 20%~30% 部位，耐心等待放量突破。');
+            } else if (isVcpSqueeze) {
+                light = 'green';
+                signalTag = 'VCP 窒息量變盤倒數';
+                rules.push('近期成交量極度萎縮，且K棒上下震幅比過去20天小了一半以上。這是浮額洗淨、「暴風雨前寧靜」的極致收斂型態。主力已將籌碼鎖定，隨時準備帶量發動。建議：提前卡位，等待帶量紅K出現即為發動點。');
+            } else if (isHighTurnover) {
                 if (isMaBearishAligned) {
-                    // 年线空頭排列：即使低位出現放量也不可信，降級為黃燈
                     light = 'yellow';
                     signalTag = '低位放量但趨勢向下';
-                    rules.push('成交量放大，但 MA5 < MA20 < MA60，均線為空頭排列，趨勢尚未羭轉。放量可能是反彈賣壓而非主力進場。建議：觀望為主，等待均線由空轉多後再考慮介入。');
+                    rules.push('成交量放大，但 MA5 < MA20 < MA60，均線為空頭排列，趨勢尚未扭轉。放量可能是反彈賣壓而非主力進場。建議：觀望為主，等待均線由空轉多後再考慮介入。');
                 } else {
                     light = 'green';
                     signalTag = isMaBullishAligned ? '低位放量建倉 (多頭確認)' : '低位放量建倉';
-                    let maNote = isMaBullishAligned ? '；且 MA5>MA20>MA60 多頭排列，趨勢向上確認，可信度極高。' : '；均線尚未形成多頭排列，主力建倉信話屬中等。';
+                    let maNote = isMaBullishAligned ? '；且 MA5>MA20>MA60 多頭排列，趨勢向上確認，可信度極高。' : '；均線尚未形成多頭排列，主力建倉信號屬中等。';
                     if (volumeRatio > 5) {
                         maNote += '（特別注意：今日爆出超過 5 日均量 5 倍以上的【天量】，顯示有極強力的資金強勢介入，但也伴隨極大波動風險）';
                     }
                     rules.push(`成交量明顯放大（超過近期均量2倍），主力正積極在低檔承接籌碼${maNote}建議：可分批買入，第一批買入30%部位，剩餘等量能持續放大後再加碼，以當日最低價為停損參考。`);
                 }
-            } else if (isShrinkingTurnover && isMacdPositive) {
-                light = 'green';
-                signalTag = '低位縮量蓄勢';
-                rules.push('低位成交量大幅縮小，代表願意賣出的人越來越少，籌碼正在集中。MACD動能指標為正，顯示趨勢轉多。建議：少量試單（10%～20%部位），耐心等待成交量明顯放大再積極加碼。');
-            } else if (isModerateVolume && isMacdPositive) {
-                light = 'green';
-                signalTag = '底部量能回升';
-                rules.push('底部成交量溫和回升（約為近期均量1.2~2倍），已有資金開始試探性進場，MACD動能轉正。建議：少量布局（10%～20%），若後續量能持續放大則逐步加碼至50%部位。');
-            } else if (isMacdJustTurnedPositive && positionPercent < 20) {
+            } else if (isMacdJustTurnedPositive) {
                 light = 'green';
                 signalTag = hasKDBottomDivergence ? '底部雙重確認 (強)' : 'MACD低位轉正';
                 const kdNote = hasKDBottomDivergence ? '且同步出現 KD 超賣區底背離，是勝率極高的底部雙重確認訊號！' : '是技術面「由跌轉漲」的關鍵轉折訊號。';
                 rules.push(`MACD動能指標剛從負值轉為正值，且股價處於極低位置，${kdNote}建議：可建立較積極的倉位（20%～30%），以20日均線為停損，確認量能跟上後再加碼。`);
+            } else if (isModerateVolume && isMacdPositive) {
+                light = 'green';
+                signalTag = '底部量能回升';
+                rules.push('底部成交量溫和回升（約為近期均量1.2~2倍），已有資金開始試探性進場，MACD動能轉正。建議：少量布局（10%～20%），若後續量能持續放大則逐步加碼至50%部位。');
             } else if (isShrinkingTurnover) {
                 light = 'yellow';
-                signalTag = '主力暗中佈局';
+                signalTag = '主力暗中佈局 (量縮)';
                 rules.push('低位成交大幅縮小，市場浮額正在減少，有意願賣出的人越來越少，籌碼開始悄悄集中。這是主力可能正在暗中佈局的早期跡象，但MACD動能尚未確認轉正。建議：可用總資金5%~10%試探性建立少量倉位，停損設在近期低點下方，耐心等待MACD轉正或量能放大後再加碼。');
             } else {
                 light = 'yellow';
                 signalTag = '低位整理等待';
-                rules.push('低位整理中，量能未有明顯變化，市場觀望情緒濃厚。目前尚無明確的主力介入跡象，但低位本身風險報酬比佳。建議：列入觀察清單，耐心等待成交量明顯放大（超過近期均量2倍）或MACD指標轉正後，再考慮介入。');
+                rules.push('低位整理中，量能未有明顯變化，市場觀望情緒濃厚。目前尚無明確的主力介入跡象，但低位本身風險報酬比佳。建議：列入觀察清單，耐心等待量價結構改變（如VCP收斂或放量突破）後再考慮介入。');
             }
         } else if (positionPercent > 60) {
             // High position zone — 炒作尾聲警戒區 (放寬至 60% 監控緩跌出貨)
