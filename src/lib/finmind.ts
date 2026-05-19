@@ -157,5 +157,26 @@ export const FinMindExtras = {
             console.warn('[FinMindExtras] MarginTrading fetch failed:', error.message || error);
             return [];
         }
+    },
+
+    getDayTrading: async (options: { stockId?: string; startDate?: string; endDate?: string }) => {
+        try {
+            const params: any = {
+                dataset: 'TaiwanStockDayTrading',
+            };
+            if (options.stockId) params.data_id = options.stockId;
+            if (options.startDate) params.start_date = options.startDate;
+            if (options.endDate) params.end_date = options.endDate;
+
+            const res = await client.get<FinMindResponse<any>>('', { params });
+            if (!res.data || res.data.status !== 200) {
+                const msg = res.data?.msg || 'No response';
+                throw new Error(`FinMind Status ${res.data?.status || 'Unknown'}: ${msg}`);
+            }
+            return res.data.data || [];
+        } catch (error: any) {
+            console.warn('[FinMindExtras] DayTrading fetch failed:', error.message || error);
+            return [];
+        }
     }
 };

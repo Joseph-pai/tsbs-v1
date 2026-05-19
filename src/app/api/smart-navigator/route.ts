@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { ExchangeClient } from '@/lib/exchange';
 import { getTotalShares } from '@/lib/shares';
 import { calculateSMA, calculateMACD, calculateMACDFull, calculateKD } from '@/services/indicators';
+import { FinMindClient, FinMindExtras } from '@/lib/finmind';
+import { format, subDays } from 'date-fns';
 
 export async function GET(request: Request) {
     try {
@@ -14,16 +16,74 @@ export async function GET(request: Request) {
             return NextResponse.json({ success: false, error: 'Missing stockId' }, { status: 400 });
         }
 
+        const endDate = format(new Date(), 'yyyy-MM-dd');
+        const startDate30 = format(subDays(new Date(), 45), 'yyyy-MM-dd'); // roughly 30 trading days
+
         // Parallelize all external data fetching
-        const [prices, _, totalShares, taiexHistory] = await Promise.all([
+        const [prices, _, totalShares, taiexHistory, marginData, dayTradingData, institutionalData] = await Promise.all([
             ExchangeClient.getStockHistory(stockId, 6),
             ExchangeClient.getIndustryMapping().catch(() => ({})),
             getTotalShares(stockId).catch(() => 0),
-            ExchangeClient.getTaiexHistory(1).catch(() => [])
+            ExchangeClient.getTaiexHistory(1).catch(() => []),
+            FinMindExtras.getMarginTrading({ stockId, startDate: startDate30, endDate }).catch(() => []),
+            FinMindExtras.getDayTrading({ stockId, startDate: startDate30, endDate }).catch(() => []),
+            FinMindClient.getInstitutional({ stockId, startDate: startDate30, endDate }).catch(() => [])
         ]);
 
         if (!prices || prices.length === 0) {
             return NextResponse.json({ success: false, error: '無法獲取該股票的歷史交易數據，請確認代號是否正確。' }, { status: 404 });
+        }
+
+        // --- Process Chip Data (Level 2 Alert Metrics) ---
+        let isMarginIncreasing = false;
+        let isLargeShareholderDropping = false;
+        let highDayTradingRate = false;
+
+        try {
+            // Margin processing (is margin continuously increasing?)
+            if (marginData && marginData.length >= 3) {
+                const recentMargin = marginData.slice(-5);
+                let increaseCount = 0;
+                for (let i = 1; i < recentMargin.length; i++) {
+                    if (recentMargin[i].MarginPurchaseTodayBalance > recentMargin[i - 1].MarginPurchaseTodayBalance) {
+                        increaseCount++;
+                    }
+                }
+                if (increaseCount >= 2 && recentMargin[recentMargin.length - 1].MarginPurchaseTodayBalance > recentMargin[0].MarginPurchaseTodayBalance) {
+                    isMarginIncreasing = true;
+                }
+            }
+
+            // Day Trading processing (average > 40%)
+            if (dayTradingData && dayTradingData.length > 0) {
+                const recentDT = dayTradingData.slice(-5);
+                let totalVolume = 0;
+                let totalDTVolume = 0;
+                recentDT.forEach((d: any) => {
+                    totalVolume += d.Volume;
+                    totalDTVolume += d.DayTradingVolume;
+                });
+                if (totalVolume > 0 && (totalDTVolume / totalVolume) > 0.4) {
+                    highDayTradingRate = true;
+                }
+            }
+
+            // Institutional Large Shareholder processing (is >1000 shares dropping?)
+            if (institutionalData && institutionalData.length >= 2) {
+                // TaiwanStockHoldingSharesPer data usually has 'HoldingSharesLevel': 15 for >1000 shares
+                // But structure might be a flat list of dates and levels. Let's group by date.
+                const lastTwoWeeks = institutionalData.filter((d: any) => parseInt(d.HoldingSharesLevel, 10) === 15);
+                if (lastTwoWeeks.length >= 2) {
+                    const sorted = lastTwoWeeks.sort((a: any, b: any) => a.date.localeCompare(b.date));
+                    const latest = sorted[sorted.length - 1].percent;
+                    const prev = sorted[sorted.length - 2].percent;
+                    if (latest < prev - 0.5) { // Dropped by more than 0.5% in a week
+                        isLargeShareholderDropping = true;
+                    }
+                }
+            }
+        } catch (e) {
+            console.error('[Chip Analysis] Error parsing chip data:', e);
         }
 
         // Fetch stock name from cache (populated by getIndustryMapping above)
@@ -251,10 +311,19 @@ export async function GET(request: Request) {
         // 新增暴力出貨布林值
         const isViolentDistribution = positionPercent > 70 && (isExtremelyHighTurnover || (isHighTurnover && hasLongUpperShadow));
         
-        let distributionLevel: 'safe' | 'watch' | 'warning' | 'alert' = 'safe';
+        let distributionLevel: 'safe' | 'watch' | 'warning' | 'alert' | 'fatal' = 'safe';
+        let isLevel2Alert = false;
+
+        // 【Level 2 籌碼實錘】大戶拋、散戶接
+        if (positionPercent > 60 && isLargeShareholderDropping && isMarginIncreasing) {
+            isLevel2Alert = true;
+        }
+
         if (positionPercent > 60) {
-            if (isViolentDistribution || (distributionPrecursorCount >= 2 && (isHighTurnover || isExtremelyHighTurnover) && positionPercent > 70)) {
-                distributionLevel = 'alert'; // 暴力出貨或放量衰退都屬於最高級別
+            if (isLevel2Alert) {
+                distributionLevel = 'fatal'; // 籌碼極度發散 (最高級別)
+            } else if (isViolentDistribution || (distributionPrecursorCount >= 2 && (isHighTurnover || isExtremelyHighTurnover) && positionPercent > 70)) {
+                distributionLevel = 'alert'; // 暴力出貨或放量衰退都屬於危險級別
             } else if (distributionPrecursorCount >= 2) {
                 distributionLevel = 'warning';
             } else if (distributionPrecursorCount === 1) {
@@ -436,7 +505,11 @@ export async function GET(request: Request) {
             // High position zone — 炒作尾聲警戒區 (放寬至 60% 監控緩跌出貨)
             rules.push(`目前股價處於近 ${period} 日相對高位（>${Math.round(positionPercent)}%）。`);
             
-            if (positionPercent > 70 && (isExtremelyHighTurnover || (isHighTurnover && hasLongUpperShadow))) {
+            if (isLevel2Alert) {
+                light = 'red';
+                signalTag = '籌碼極度發散 (大戶拋散戶接)';
+                rules.push('🔴 【籌碼實錘預警】系統偵測到股價在高位區間，且真實籌碼出現「千張大戶持股連續下滑，但散戶融資餘額卻連續大增」的極度發散現象。這代表主力已經毫不掩飾地將手中持股倒給進場接盤的散戶。建議：不管技術線型多漂亮，這是主力出貨的絕對鐵證，請務必立即避開或清倉！');
+            } else if (positionPercent > 70 && (isExtremelyHighTurnover || (isHighTurnover && hasLongUpperShadow))) {
                 // Signal 2: 炒作尾聲 — 主力暴力出貨 (最高優先級)
                 light = 'red';
                 signalTag = hasLongUpperShadow ? '主力逢高倒貨 (避雷針)' : '主力高位暴力出貨';
