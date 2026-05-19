@@ -429,7 +429,7 @@ export default function SmartNavigatorPage() {
 
     // Auto Filter State
     const [showAutoFilter, setShowAutoFilter] = useState(false);
-    const [autoPeriod, setAutoPeriod] = useState('30');
+    const [autoPeriod, setAutoPeriod] = useState('90');
     const [maxPosition, setMaxPosition] = useState('70');
     const [scanRecords, setScanRecords] = useState<any[]>([]);
     const [selectedDates, setSelectedDates] = useState<string[]>([]);
@@ -989,13 +989,19 @@ export default function SmartNavigatorPage() {
                                         <div className="text-sm text-slate-400 mb-2 font-medium">1. 篩選模式</div>
                                         <div className="flex gap-2">
                                             <button
-                                                onClick={() => setFilterMode('green')}
+                                                onClick={() => {
+                                                    setFilterMode('green');
+                                                    setAutoPeriod('90');
+                                                }}
                                                 className={`flex-1 py-2.5 rounded-xl text-sm font-black border transition-all ${filterMode === 'green' ? 'bg-indigo-500/20 border-indigo-500 text-indigo-400' : 'bg-black/40 border-slate-700 text-slate-400 hover:bg-slate-800'}`}
                                             >
                                                 🎯 主力進場
                                             </button>
                                             <button
-                                                onClick={() => setFilterMode('distribution')}
+                                                onClick={() => {
+                                                    setFilterMode('distribution');
+                                                    setAutoPeriod('60');
+                                                }}
                                                 className={`flex-1 py-2.5 rounded-xl text-sm font-black border transition-all ${filterMode === 'distribution' ? 'bg-rose-500/20 border-rose-500 text-rose-400' : 'bg-black/40 border-slate-700 text-slate-400 hover:bg-slate-800'}`}
                                             >
                                                 ⚠️ 出貨預警
