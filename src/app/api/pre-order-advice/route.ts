@@ -20,49 +20,43 @@ function roundToTwseTick(price: number): number {
     }
 }
 
-export async function GET(request: Request) {
-    const { searchParams } = new URL(request.url);
-    const stockId = searchParams.get('stockId');
+async function diagnoseSingle(stockId: string, todayStr: string) {
+    const cacheKey = `tsbs:pre-order:${stockId}:${todayStr}`;
 
-    if (!stockId) {
-        return NextResponse.json({ success: false, error: '缺少股票代碼 (stockId required)' }, { status: 400 });
+    // 1. Try Cache
+    try {
+        const cached = await redis.get(cacheKey);
+        if (cached) {
+            return {
+                success: true,
+                stock_id: stockId,
+                data: JSON.parse(cached),
+                cached: true
+            };
+        }
+    } catch (e) {
+        console.warn(`Redis cache read failed for pre-order ${stockId}:`, e);
     }
 
     try {
-        const todayStr = new Date().toISOString().split('T')[0];
-        const cacheKey = `tsbs:pre-order:${stockId}:${todayStr}`;
-
-        // 1. Try Cache
-        try {
-            const cached = await redis.get(cacheKey);
-            if (cached) {
-                return NextResponse.json({
-                    success: true,
-                    data: JSON.parse(cached),
-                    cached: true
-                });
-            }
-        } catch (e) {
-            console.warn('Redis cache read failed for pre-order:', e);
-        }
-
         // 2. Fetch Analysis and Price History via ScannerService
-        // We use true for enhanced to get the most precise chip and revenue parameters if needed
         const result = await ScannerService.analyzeStock(stockId, undefined, undefined, undefined, undefined, true);
 
         if (!result) {
-            return NextResponse.json({
+            return {
                 success: false,
+                stock_id: stockId,
                 error: '查無此股票或歷史數據不足，無法進行 12H 預約賣出診斷。'
-            }, { status: 404 });
+            };
         }
 
         const prices = result.history || [];
         if (prices.length < 5) {
-            return NextResponse.json({
+            return {
                 success: false,
+                stock_id: stockId,
                 error: '個股歷史價格數據不足 5 日，無法計算均線生命線。'
-            }, { status: 400 });
+            };
         }
 
         // 3. Compute 5-day Moving Average (5MA)
@@ -70,7 +64,6 @@ export async function GET(request: Request) {
         const ma5 = last5Days.reduce((sum, p) => sum + p.close, 0) / 5;
 
         // 4. Compute 10-day Average Upper Shadow
-        // Upper Shadow % = (High - Max(Open, Close)) / Close
         const last10Days = prices.slice(-10);
         const upperShadows = last10Days.map(day => {
             const bodyMax = Math.max(day.open, day.close);
@@ -104,7 +97,6 @@ export async function GET(request: Request) {
         if (isBelow5MA) {
             advice = 'SELL';
             reason = `【生命線告急】股價最新收盤價 $${close} 已跌破 5日均線生命線 $${ma5.toFixed(2)}，短線趨勢轉空！籌碼共振分僅 ${scorePercent} 分。`;
-            // Conservative rebound target: close + 1.0% (rounded to nearest TWSE tick)
             bestPresetSellPrice = roundToTwseTick(close * 1.01);
             suggestedPremiumPercent = 1.0;
         } else if (scorePercent < 50) {
@@ -115,13 +107,11 @@ export async function GET(request: Request) {
         } else {
             advice = 'HOLD';
             reason = `【強勢多頭】股價完美站穩 5日均線生命線 $${ma5.toFixed(2)}，且籌碼共振評分高達 ${scorePercent} 分，短線多頭結構健全。`;
-            // Bullish target-setting formula: Close * (1 + AvgUpperShadow + 1.5% premium buffer)
             const premium = avgUpperShadow + 0.015;
             bestPresetSellPrice = roundToTwseTick(close * (1 + premium));
             suggestedPremiumPercent = Math.round(premium * 1000) / 10;
         }
 
-        // Double check: if target price is somehow less than or equal to close, make sure it is at least 1 tick higher (if holding)
         if (advice === 'HOLD' && bestPresetSellPrice <= close) {
             bestPresetSellPrice = roundToTwseTick(close * 1.02);
             suggestedPremiumPercent = 2.0;
@@ -149,15 +139,47 @@ export async function GET(request: Request) {
         try {
             await redis.set(cacheKey, JSON.stringify(data), 'EX', 43200);
         } catch (e) {
-            console.warn('Redis cache write failed for pre-order:', e);
+            console.warn(`Redis cache write failed for pre-order ${stockId}:`, e);
         }
+
+        return {
+            success: true,
+            stock_id: stockId,
+            data
+        };
+    } catch (error: any) {
+        console.error(`Pre-order Advisor API Error for ${stockId}:`, error);
+        return {
+            success: false,
+            stock_id: stockId,
+            error: error.message || '無法取得個股決策建議，請檢查股票代碼是否正確。'
+        };
+    }
+}
+
+export async function GET(request: Request) {
+    const { searchParams } = new URL(request.url);
+    const stockId = searchParams.get('stockId');
+
+    if (!stockId) {
+        return NextResponse.json({ success: false, error: '缺少股票代碼 (stockId required)' }, { status: 400 });
+    }
+
+    const ids = stockId.split(',').map(id => id.trim()).filter(Boolean);
+    if (ids.length === 0) {
+        return NextResponse.json({ success: false, error: '無效的股票代碼' }, { status: 400 });
+    }
+
+    try {
+        const todayStr = new Date().toISOString().split('T')[0];
+        const results = await Promise.all(ids.map(id => diagnoseSingle(id, todayStr)));
 
         return NextResponse.json({
             success: true,
-            data
+            results
         });
     } catch (error: any) {
-        console.error('Pre-order Advisor API Error:', error);
+        console.error('Pre-order Advisor Batch API Error:', error);
         return NextResponse.json({
             success: false,
             error: error.message || '無法取得個股決策建議，請檢查股票代碼是否正確。'
