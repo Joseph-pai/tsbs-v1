@@ -1507,6 +1507,12 @@ export default function DashboardPage() {
 
                   return (
                     <>
+                      {/* ── 出現次數圖例說明 ── */}
+                      <div className="flex items-center gap-2 px-4 py-2 bg-blue-500/5 border border-blue-500/15 rounded-xl text-xs font-bold text-slate-500 mb-2">
+                        <span className="text-blue-400">🔁</span>
+                        <span>出現次數：在目前篩選日期範圍內，重複被掃描出現的股票。次數越高代表訊號持續性越強。</span>
+                      </div>
+
                       {/* ── History Date Picker ── */}
                       <div className="bg-black/30 rounded-[2rem] p-8 border border-white/5 mb-6">
                         <div className="flex items-center justify-between mb-4">
@@ -1700,10 +1706,7 @@ export default function DashboardPage() {
                                         <span className="text-2xl font-black text-white">{r.stock_id}</span>
                                         <span className="text-lg font-bold text-slate-400">{r.stock_name}</span>
                                         {frequency[r.stock_id] > 1 && (
-                                          <span
-                                            className="px-2 py-0.5 rounded-lg bg-blue-500/10 border border-blue-500/30 text-[10px] font-black text-blue-400 cursor-help"
-                                            title={`此股票在目前篩選範圍內共出現 ${frequency[r.stock_id]} 次掃描紀錄。\n出現次數越高，代表該股持續符合共振條件，訊號可信度與持續性較強。`}
-                                          >
+                                          <span className="px-2 py-0.5 rounded-lg bg-blue-500/10 border border-blue-500/30 text-[10px] font-black text-blue-400">
                                             🔁 出現 {frequency[r.stock_id]} 次
                                           </span>
                                         )}
