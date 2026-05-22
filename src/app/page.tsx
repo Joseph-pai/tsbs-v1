@@ -1621,10 +1621,20 @@ export default function DashboardPage() {
                                 className="w-6 h-6 rounded-lg bg-slate-900 border-white/10 checked:bg-amber-500 transition-all cursor-pointer"
                               />
                             </label>
-                            <div className="flex items-center gap-4">
+                            <div className="flex items-center gap-4 flex-wrap">
                               <div className="px-4 py-1 rounded-full bg-amber-500/20 text-amber-400 text-sm font-black">
                                 {session.date}
                               </div>
+                              {/* 掃描模式標籤 */}
+                              {(session as any).scanMode === 'enhanced' ? (
+                                <span className="px-3 py-1 rounded-full bg-purple-500/20 border border-purple-500/40 text-purple-400 text-xs font-black">
+                                  ⚡ 強化評分掃描
+                                </span>
+                              ) : (
+                                <span className="px-3 py-1 rounded-full bg-blue-500/20 border border-blue-500/40 text-blue-400 text-xs font-black">
+                                  🔥 定點共振掃描
+                                </span>
+                              )}
                               <span className="text-slate-400 font-bold">{session.market} · {session.sector}</span>
                             </div>
                           </div>
@@ -1690,8 +1700,11 @@ export default function DashboardPage() {
                                         <span className="text-2xl font-black text-white">{r.stock_id}</span>
                                         <span className="text-lg font-bold text-slate-400">{r.stock_name}</span>
                                         {frequency[r.stock_id] > 1 && (
-                                          <span className="px-2 py-0.5 rounded-lg bg-blue-500/10 border border-blue-500/30 text-[10px] font-black text-blue-400">
-                                            出現 {frequency[r.stock_id]} 次
+                                          <span
+                                            className="px-2 py-0.5 rounded-lg bg-blue-500/10 border border-blue-500/30 text-[10px] font-black text-blue-400 cursor-help"
+                                            title={`此股票在目前篩選範圍內共出現 ${frequency[r.stock_id]} 次掃描紀錄。\n出現次數越高，代表該股持續符合共振條件，訊號可信度與持續性較強。`}
+                                          >
+                                            🔁 出現 {frequency[r.stock_id]} 次
                                           </span>
                                         )}
                                       </div>

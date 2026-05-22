@@ -122,26 +122,54 @@ export const StockCard: React.FC<StockCardProps> = ({ data, index, onClick }) =>
                     )}>
                         {isPositive ? '▲' : '▼'} {(data.change_percent * 100).toFixed(2)}%
                     </div>
-                    <div className="mt-2 flex items-center gap-2">
-                        {/* Win Rate Score Badge */}
-                        <div 
-                            className="group/badge relative flex items-center gap-1.5 bg-blue-500/10 border border-blue-500/30 rounded-lg px-3 py-1 cursor-help"
-                            title="【勝率分數】&#10;主要計算：量能倍數、均線糾結度、突破幅度與相對強弱。&#10;判斷方式：分數越高代表技術面剛轉強，未來上漲機率較大。"
-                        >
-                            <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">勝率</span>
-                            <span className="text-base font-black font-mono text-blue-400">
-                                {Math.round(data.win_rate_score ?? ((data.score || 0) * 100))}
-                            </span>
-                        </div>
-                        {/* Explosive Score Badge */}
-                        <div 
-                            className="group/badge relative flex items-center gap-1.5 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-1 cursor-help"
-                            title="【爆發力分數】&#10;主要計算：勝率分數加權股性波動率，並扣除高位階風險與長上影線拋壓。&#10;判斷方式：分數越高代表該股漲幅潛力大，容易出現波段大行情。"
-                        >
-                            <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">爆發力</span>
-                            <span className="text-base font-black font-mono text-amber-400">
-                                {Math.round(data.explosive_score ?? (data.potential_score || data.comprehensiveScoreDetails?.total || ((data.score || 0) * 100)))}
-                            </span>
+                    <div className="mt-2 flex flex-col items-end gap-1.5">
+                        {/* Comprehensive Score Badge (上方，較大) */}
+                        {(() => {
+                            const comprehensiveScore = Math.round(data.potential_score || data.comprehensiveScoreDetails?.total || ((data.score || 0) * 100));
+                            const scoreColor = comprehensiveScore >= 80
+                                ? 'text-amber-400'
+                                : comprehensiveScore >= 60
+                                    ? 'text-blue-400'
+                                    : 'text-slate-500';
+                            const scoreBg = comprehensiveScore >= 80
+                                ? 'from-amber-500/15 to-orange-500/10 border-amber-500/50'
+                                : comprehensiveScore >= 60
+                                    ? 'from-blue-500/15 to-indigo-500/10 border-blue-500/50'
+                                    : 'from-slate-800/50 to-slate-800/30 border-slate-700/50';
+                            return (
+                                <div
+                                    className={cn("flex items-center gap-1.5 bg-gradient-to-r rounded-xl px-3 py-1.5 border cursor-help", scoreBg)}
+                                    title={`【綜合評分】\n整合勝率分數與爆發力的加權總分（滿分 100）。\n80分以上為強力訊號，60~79分為潛力標的，60分以下謹慎觀察。`}
+                                >
+                                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">綜合評分</span>
+                                    <span className={cn("text-2xl font-black font-mono leading-none", scoreColor)}>
+                                        {comprehensiveScore}
+                                    </span>
+                                </div>
+                            );
+                        })()}
+                        {/* Win Rate + Explosive Score (下方，較小，並排) */}
+                        <div className="flex items-center gap-2">
+                            {/* Win Rate Score Badge */}
+                            <div
+                                className="group/badge relative flex items-center gap-1.5 bg-blue-500/10 border border-blue-500/30 rounded-lg px-3 py-1 cursor-help"
+                                title="【勝率分數】&#10;主要計算：量能倍數、均線糾結度、突破幅度與相對強弱。&#10;判斷方式：分數越高代表技術面剛轉強，未來上漲機率較大。"
+                            >
+                                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">勝率</span>
+                                <span className="text-base font-black font-mono text-blue-400">
+                                    {Math.round(data.win_rate_score ?? ((data.score || 0) * 100))}
+                                </span>
+                            </div>
+                            {/* Explosive Score Badge */}
+                            <div
+                                className="group/badge relative flex items-center gap-1.5 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-1 cursor-help"
+                                title="【爆發力分數】&#10;主要計算：勝率分數加權股性波動率，並扣除高位階風險與長上影線拋壓。&#10;判斷方式：分數越高代表該股漲幅潛力大，容易出現波段大行情。"
+                            >
+                                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">爆發力</span>
+                                <span className="text-base font-black font-mono text-amber-400">
+                                    {Math.round(data.explosive_score ?? (data.potential_score || data.comprehensiveScoreDetails?.total || ((data.score || 0) * 100)))}
+                                </span>
+                            </div>
                         </div>
                     </div>
                 </div>
