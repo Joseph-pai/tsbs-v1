@@ -1185,7 +1185,7 @@ export default function DashboardPage() {
       </div>
 
       {/* Results Container */}
-      <div className="space-y-6">
+      <div id="pdf-export-area" className="space-y-6">
         {error && (
           <div className="p-10 bg-rose-500/10 border-4 border-rose-500/20 rounded-[3rem] text-center">
             <p className="text-2xl font-black text-rose-400">{error}</p>
@@ -1271,7 +1271,7 @@ export default function DashboardPage() {
                       await new Promise(r => setTimeout(r, 100));
                       try {
                         const dateStr = format(new Date(), 'yyyyMMdd_HHmm');
-                        await exportToPDF('scan-results-container', `共振掃描結果_${dateStr}.pdf`);
+                        await exportToPDF('pdf-export-area', `共振掃描結果_${dateStr}.pdf`);
                       } finally {
                         setIsExportingPDF(false);
                       }
@@ -1324,7 +1324,7 @@ export default function DashboardPage() {
                       await new Promise(r => setTimeout(r, 100));
                       try {
                         const dateStr = format(new Date(), 'yyyyMMdd_HHmm');
-                        await exportToPDF('enhanced-results-container', `強化掃描結果_${dateStr}.pdf`);
+                        await exportToPDF('pdf-export-area', `強化掃描結果_${dateStr}.pdf`);
                       } finally {
                         setIsExportingPDF(false);
                       }
