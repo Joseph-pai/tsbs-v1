@@ -86,6 +86,7 @@ export default function DashboardPage() {
   const [backtestCalViewMonth, setBacktestCalViewMonth] = useState(() => new Date());
   const [historySelectedDates, setHistorySelectedDates] = useState<Set<string>>(new Set());
   const [historyCalViewMonth, setHistoryCalViewMonth] = useState(() => new Date());
+  const [showDarkHorseOnly, setShowDarkHorseOnly] = useState(false);
 
   // ── 強化評分掃描 ──
   const [enhancedResults, setEnhancedResults] = useState<AnalysisResult[]>([]);
@@ -794,16 +795,60 @@ export default function DashboardPage() {
   };
 
   const filteredResults = useMemo(() => {
-    return results.filter(s =>
+    let baseResults = results.filter(s =>
       s.stock_id.includes(searchTerm) || s.stock_name.includes(searchTerm)
     );
-  }, [results, searchTerm]);
+
+    if (showDarkHorseOnly) {
+      const sectorCounts = baseResults.reduce((acc, stock) => {
+        const sector = stock.sector_name || '未知';
+        acc[sector] = (acc[sector] || 0) + 1;
+        return acc;
+      }, {} as Record<string, number>);
+
+      baseResults = baseResults.filter(stock => {
+        const score = stock.potential_score || stock.score || 0;
+        const isLowScore = score <= 86;
+        
+        const sector = stock.sector_name || '未知';
+        const isHotSector = sectorCounts[sector] >= 2;
+        
+        const hasBreakoutTag = stock.isRevenueNewHigh || stock.is_ma_breakout || (stock.tags && (stock.tags.includes('BREAKOUT') || stock.tags.includes('REVENUE_NEW_HIGH')));
+
+        return isLowScore && (isHotSector || hasBreakoutTag);
+      }).sort((a, b) => (b.potential_score || b.score || 0) - (a.potential_score || a.score || 0));
+    }
+
+    return baseResults;
+  }, [results, searchTerm, showDarkHorseOnly]);
 
   const filteredEnhancedResults = useMemo(() => {
-    return enhancedResults.filter(s =>
+    let baseResults = enhancedResults.filter(s =>
       s.stock_id.includes(searchTerm) || s.stock_name.includes(searchTerm)
     );
-  }, [enhancedResults, searchTerm]);
+
+    if (showDarkHorseOnly) {
+      const sectorCounts = baseResults.reduce((acc, stock) => {
+        const sector = stock.sector_name || '未知';
+        acc[sector] = (acc[sector] || 0) + 1;
+        return acc;
+      }, {} as Record<string, number>);
+
+      baseResults = baseResults.filter(stock => {
+        const score = stock.potential_score || stock.score || 0;
+        const isLowScore = score <= 86;
+        
+        const sector = stock.sector_name || '未知';
+        const isHotSector = sectorCounts[sector] >= 2;
+        
+        const hasBreakoutTag = stock.isRevenueNewHigh || stock.is_ma_breakout || (stock.tags && (stock.tags.includes('BREAKOUT') || stock.tags.includes('REVENUE_NEW_HIGH')));
+
+        return isLowScore && (isHotSector || hasBreakoutTag);
+      }).sort((a, b) => (b.potential_score || b.score || 0) - (a.potential_score || a.score || 0));
+    }
+
+    return baseResults;
+  }, [enhancedResults, searchTerm, showDarkHorseOnly]);
 
   const isWorking = stage !== 'idle' && stage !== 'complete';
 
@@ -1208,7 +1253,18 @@ export default function DashboardPage() {
               </div>
             ) : filteredResults.length > 0 ? (
               <div className="relative animate-in fade-in slide-in-from-bottom-8 duration-700">
-                <div className="flex justify-end mb-4 pr-2">
+                <div className="flex justify-end mb-4 pr-2 gap-3">
+                  <button
+                    onClick={() => setShowDarkHorseOnly(!showDarkHorseOnly)}
+                    className={clsx(
+                      "inline-flex items-center gap-2 px-4 py-2 border rounded-xl transition-all font-black text-sm",
+                      showDarkHorseOnly
+                        ? "bg-amber-500/20 border-amber-500 text-amber-400 shadow-[0_0_15px_rgba(245,158,11,0.3)]"
+                        : "bg-slate-800/50 border-slate-700 text-slate-400 hover:bg-slate-800 hover:text-slate-300"
+                    )}
+                  >
+                    🐎 {showDarkHorseOnly ? '已開啟黑馬預測' : '黑馬預測'}
+                  </button>
                   <button
                     onClick={async () => {
                       setIsExportingPDF(true);
@@ -1250,7 +1306,18 @@ export default function DashboardPage() {
               </div>
             ) : filteredEnhancedResults.length > 0 ? (
               <div className="relative animate-in fade-in slide-in-from-bottom-8 duration-700">
-                <div className="flex justify-end mb-4 pr-2">
+                <div className="flex justify-end mb-4 pr-2 gap-3">
+                  <button
+                    onClick={() => setShowDarkHorseOnly(!showDarkHorseOnly)}
+                    className={clsx(
+                      "inline-flex items-center gap-2 px-4 py-2 border rounded-xl transition-all font-black text-sm",
+                      showDarkHorseOnly
+                        ? "bg-amber-500/20 border-amber-500 text-amber-400 shadow-[0_0_15px_rgba(245,158,11,0.3)]"
+                        : "bg-slate-800/50 border-slate-700 text-slate-400 hover:bg-slate-800 hover:text-slate-300"
+                    )}
+                  >
+                    🐎 {showDarkHorseOnly ? '已開啟黑馬預測' : '黑馬預測'}
+                  </button>
                   <button
                     onClick={async () => {
                       setIsExportingPDF(true);
