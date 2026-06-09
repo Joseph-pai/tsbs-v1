@@ -87,6 +87,7 @@ export default function DashboardPage() {
   const [historySelectedDates, setHistorySelectedDates] = useState<Set<string>>(new Set());
   const [historyCalViewMonth, setHistoryCalViewMonth] = useState(() => new Date());
   const [showDarkHorseOnly, setShowDarkHorseOnly] = useState(false);
+  const [backtestCustomStocks, setBacktestCustomStocks] = useState<string>(''); // 指定個股回測輸入
 
   // ── 強化評分掃描 ──
   const [enhancedResults, setEnhancedResults] = useState<AnalysisResult[]>([]);
@@ -273,9 +274,24 @@ export default function DashboardPage() {
       const sessionMode = session.scanMode || 'original';
       if (sessionMode !== backtestScanMode) return;
 
+      // ── 解析指定個股清單 ──
+      const customStockList = backtestCustomStocks
+        .split(/[,，\s]+/)
+        .map((s: string) => s.trim())
+        .filter(Boolean);
+
       items.forEach(r => {
         // 🔧 過濾當日掃描：fromDate === todayStr 時，API 一定回傳「當日無歷史數據」，直接跳過
         if (fromDate === todayStr) return;
+
+        // ── 指定個股過濾：若用戶有輸入，只處理符合的股票 ──
+        if (customStockList.length > 0) {
+          const match = customStockList.some(
+            (q: string) => r.stock_id === q || (r.stock_name && r.stock_name.includes(q))
+          );
+          if (!match) return;
+        }
+
         const existing = earliestScanMap.get(r.stock_id);
         // 保留 fromDate 最早的那一筆，讓基準價格為首次掃描當日收盤價
         if (!existing || fromDate < existing.fromDate) {
@@ -1933,13 +1949,24 @@ export default function DashboardPage() {
 
             {/* ── Backtest Date Picker ── */}
             {(() => {
-              // Compute which dates have scan records
-              const btRecordDates = new Set<string>();
+              // btAllDates：所有模式的紀錄日期（用來顯示「當日無數據」提示）
+              const btAllDates = new Set<string>();
               historyRecords.forEach(s => {
                 const d = (s as any).scanDate || ((s as any).createdAt?.seconds
                   ? format(new Date((s as any).createdAt.seconds * 1000), 'yyyy-MM-dd')
                   : '');
-                if (d) btRecordDates.add(d);
+                if (d) btAllDates.add(d);
+              });
+
+              // btModeRecordDates：只含符合當前 backtestScanMode 的日期
+              const btModeRecordDates = new Set<string>();
+              historyRecords.forEach(s => {
+                const sessionMode = (s as any).scanMode || 'original';
+                if (sessionMode !== backtestScanMode) return;
+                const d = (s as any).scanDate || ((s as any).createdAt?.seconds
+                  ? format(new Date((s as any).createdAt.seconds * 1000), 'yyyy-MM-dd')
+                  : '');
+                if (d) btModeRecordDates.add(d);
               });
 
               const btDays = eachDayOfInterval({
@@ -1947,7 +1974,7 @@ export default function DashboardPage() {
                 end: endOfMonth(backtestCalViewMonth)
               });
               const btLeading = getDay(startOfMonth(backtestCalViewMonth));
-              const allSelected = btRecordDates.size > 0 && backtestSelectedDates.size === btRecordDates.size;
+              const allSelected = btModeRecordDates.size > 0 && backtestSelectedDates.size === btModeRecordDates.size;
 
               return (
                 <div className="bg-black/30 rounded-[2rem] p-8 border border-white/5 mb-6">
@@ -1967,10 +1994,10 @@ export default function DashboardPage() {
                           if (allSelected) {
                             setBacktestSelectedDates(new Set());
                           } else {
-                            setBacktestSelectedDates(new Set(btRecordDates));
+                            setBacktestSelectedDates(new Set(btModeRecordDates));
                           }
                         }}
-                        disabled={isBacktesting || btRecordDates.size === 0}
+                        disabled={isBacktesting || btModeRecordDates.size === 0}
                         className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border border-emerald-500/40 text-emerald-400 hover:bg-emerald-600/20 transition-colors disabled:opacity-40"
                       >
                         {allSelected
@@ -2023,38 +2050,51 @@ export default function DashboardPage() {
                       {Array.from({ length: btLeading }).map((_, i) => <div key={`b${i}`} />)}
                       {btDays.map(day => {
                         const ds = format(day, 'yyyy-MM-dd');
-                        const hasRec = btRecordDates.has(ds);
+                        const hasModRec = btModeRecordDates.has(ds);   // 符合當前模式有紀錄
+                        const hasAnyRec = btAllDates.has(ds);           // 任意模式有紀錄
+                        const isNoData = hasAnyRec && !hasModRec;       // 有紀錄但當前模式無數據
                         const isSel = backtestSelectedDates.has(ds);
                         return (
                           <button
                             key={ds}
                             onClick={() => {
-                              if (!hasRec || isBacktesting) return;
+                              if (!hasModRec || isBacktesting) return;
                               setBacktestSelectedDates(prev => {
                                 const next = new Set(prev);
                                 if (next.has(ds)) next.delete(ds); else next.add(ds);
                                 return next;
                               });
                             }}
-                            disabled={!hasRec || isBacktesting}
+                            disabled={!hasModRec || isBacktesting}
+                            title={isNoData ? '當日無此模式的數據' : undefined}
                             className={`
                               relative flex flex-col items-center justify-center h-9 w-full rounded-lg text-xs font-semibold border transition-all
                               ${isSel
                                 ? 'bg-emerald-600 text-white border-emerald-500'
-                                : hasRec
+                                : hasModRec
                                   ? 'text-slate-200 border-slate-700 hover:bg-emerald-600/20 hover:border-emerald-500/50 cursor-pointer'
-                                  : 'text-slate-700 border-transparent cursor-default'
+                                  : isNoData
+                                    ? 'bg-slate-800/60 text-amber-600/60 border-amber-900/20 cursor-default'
+                                    : 'text-slate-700 border-transparent cursor-default'
                               }
                             `}
                           >
                             <span>{day.getDate()}</span>
-                            {hasRec && (
-                              <span className={`absolute bottom-1 w-1 h-1 rounded-full ${isSel ? 'bg-white' : 'bg-emerald-400'}`} />
+                            {isSel && <span className="absolute bottom-1 w-1 h-1 rounded-full bg-white" />}
+                            {!isSel && hasModRec && <span className="absolute bottom-1 w-1 h-1 rounded-full bg-emerald-400" />}
+                            {isNoData && (
+                              <span className="absolute bottom-0.5 text-[7px] font-black text-amber-600/60 leading-none">無數據</span>
                             )}
                           </button>
                         );
                       })}
                     </div>
+                  </div>
+
+                  {/* 圖例說明 */}
+                  <div className="flex items-center gap-4 mt-3 text-[10px] font-bold text-slate-600">
+                    <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-400 inline-block" /> 有紀錄（可選）</span>
+                    <span className="flex items-center gap-1"><span className="w-2 h-2 rounded bg-slate-800 border border-amber-900/30 inline-block" /> 當日無此模式數據</span>
                   </div>
 
                   {backtestSelectedDates.size > 0 && (
@@ -2065,6 +2105,38 @@ export default function DashboardPage() {
                 </div>
               );
             })()}
+            <div className="bg-black/30 rounded-[2rem] p-8 border border-white/5 mb-6">
+              <div className="flex items-center gap-2 mb-3">
+                <span className="text-lg font-black text-slate-300">指定個股回測</span>
+                <span className="text-xs font-bold text-slate-500">（選填，留空則回測所有紀錄）</span>
+              </div>
+              <p className="text-xs font-bold text-slate-600 mb-3">
+                輸入股票代碼或名稱，多個請用逗號或空格分隔，例如：2330, 2317 或 台積電 鴻海
+              </p>
+              <input
+                type="text"
+                value={backtestCustomStocks}
+                onChange={e => setBacktestCustomStocks(e.target.value)}
+                disabled={isBacktesting}
+                placeholder="如：2330, 2317, 鴻海"
+                className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm font-bold text-white placeholder:text-slate-600 focus:outline-none focus:border-emerald-500/60 transition-colors disabled:opacity-50"
+              />
+              {backtestCustomStocks.trim() && (
+                <div className="flex items-center justify-between mt-2">
+                  <p className="text-xs font-bold text-emerald-400/70">
+                    將只回測以下股票：
+                    {backtestCustomStocks.split(/[,，\s]+/).map(s => s.trim()).filter(Boolean).map((s, i) => (
+                      <span key={i} className="ml-1 px-1.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">{s}</span>
+                    ))}
+                  </p>
+                  <button
+                    onClick={() => setBacktestCustomStocks('')}
+                    disabled={isBacktesting}
+                    className="text-xs font-bold text-slate-500 hover:text-slate-300 transition-colors"
+                  >清除</button>
+                </div>
+              )}
+            </div>
 
             <div className="bg-black/30 rounded-[2rem] p-8 border border-white/5 mb-8">
               <div className="flex justify-between items-center mb-4">
@@ -2107,6 +2179,13 @@ export default function DashboardPage() {
               const noDataList = backtestResults.filter(r => r.peakPrice === null && !(r as any).message?.includes('當日無歷史數據'));
               const hasDataList = backtestResults.filter(r => r.peakPrice !== null);
               const successRate = hasDataList.length > 0 ? Math.round((successList.length / hasDataList.length) * 100) : 0;
+              // 按漲幅從高到低排序
+              const sortedSuccessList = [...successList].sort(
+                (a, b) => (b.gainPercent ?? -Infinity) - (a.gainPercent ?? -Infinity)
+              );
+              const sortedFailList = [...failList].sort(
+                (a, b) => (b.gainPercent ?? -Infinity) - (a.gainPercent ?? -Infinity)
+              );
               return (
                 <div id="backtest-results-container" className="space-y-8 p-[2px] rounded-3xl bg-slate-900 border border-slate-900 pt-2 -mx-2 px-2">
                   <div className="grid grid-cols-3 gap-4">
@@ -2142,7 +2221,7 @@ export default function DashboardPage() {
                         <span className="text-xl font-black text-emerald-400">成功達標 ({successList.length})</span>
                       </div>
                       <div className="space-y-3">
-                        {successList.map((r, i) => (
+                        {sortedSuccessList.map((r, i) => (
                           <div key={`s-${i}`} className="flex items-center justify-between p-5 bg-emerald-500/5 border border-emerald-500/20 rounded-2xl">
                             <div className="flex-1 pr-4">
                               <div className="flex items-center gap-3 flex-wrap">
@@ -2208,7 +2287,7 @@ export default function DashboardPage() {
                         <span className="text-xl font-black text-rose-400">未達標 ({failList.length})</span>
                       </div>
                       <div className="space-y-2">
-                        {failList.map((r, i) => (
+                        {sortedFailList.map((r, i) => (
                           <div key={`f-${i}`} className="flex items-center justify-between p-4 bg-rose-500/5 border border-rose-500/10 rounded-2xl">
                             <div className="flex-1 pr-4">
                               <div className="flex items-center gap-3 flex-wrap">
