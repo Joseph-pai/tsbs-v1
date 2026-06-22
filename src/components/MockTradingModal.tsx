@@ -170,7 +170,7 @@ export default function MockTradingModal({ isOpen, onClose, snapshot }: MockTrad
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
             <div className="absolute inset-0 bg-black/80 backdrop-blur-sm transition-opacity" onClick={onClose} />
 
-            <div className="relative w-full max-w-5xl bg-slate-900 border border-slate-800 rounded-3xl shadow-[0_0_50px_rgba(0,0,0,0.8)] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200 max-h-[90vh]">
+            <div className="relative w-full max-w-7xl bg-slate-900 border border-slate-800 rounded-3xl shadow-[0_0_50px_rgba(0,0,0,0.8)] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200 max-h-[90vh]">
                 {/* Visual Accent Glow */}
                 <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-emerald-500 to-teal-500" />
 
@@ -209,32 +209,32 @@ export default function MockTradingModal({ isOpen, onClose, snapshot }: MockTrad
                     </div>
 
                     {/* 表格標頭區 (Desktop) */}
-                    <div className="hidden lg:grid grid-cols-12 gap-3 px-4 text-sm font-black text-slate-400 uppercase tracking-widest text-center">
-                        <div className="col-span-2 text-left">買入日期</div>
-                        <div className="col-span-2 text-left">股票代碼</div>
-                        <div className="col-span-1">買入價</div>
-                        <div className="col-span-1">股數</div>
-                        <div className="col-span-1">目標 %</div>
-                        <div className="col-span-1">目標價</div>
-                        <div className="col-span-2">狀態</div>
-                        <div className="col-span-1 text-right">獲利</div>
-                        <div className="col-span-1">操作</div>
+                    <div className="hidden lg:grid lg:grid-cols-[1.4fr_1.8fr_1.2fr_1.2fr_1fr_1.2fr_1.8fr_1.2fr_0.6fr] gap-3 px-4 text-sm font-black text-slate-400 uppercase tracking-widest text-center">
+                        <div className="text-left">買入日期</div>
+                        <div className="text-left">股票代碼</div>
+                        <div>買入價</div>
+                        <div>股數</div>
+                        <div>目標 %</div>
+                        <div>目標價</div>
+                        <div>狀態</div>
+                        <div className="text-right">獲利</div>
+                        <div>操作</div>
                     </div>
 
                     {/* 行列表 */}
                     <div className="space-y-3">
                         {rows.map((row, idx) => (
                             <div key={row.id} className="relative bg-slate-950 border border-slate-800 hover:border-slate-700 rounded-2xl p-4 lg:p-2 lg:px-4 transition-colors">
-                                <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-3 items-center">
+                                <div className="grid grid-cols-1 lg:grid-cols-[1.4fr_1.8fr_1.2fr_1.2fr_1fr_1.2fr_1.8fr_1.2fr_0.6fr] gap-4 lg:gap-3 items-center">
                                     {/* 手機版顯示標籤，桌面版隱藏 */}
                                     
-                                    <div className="col-span-2 flex flex-col gap-1">
+                                    <div className="flex flex-col gap-1">
                                         <label className="lg:hidden text-xs text-slate-400 font-bold uppercase">買入日期</label>
                                         <input type="date" value={row.buyDate} onChange={e => updateRow(row.id, { buyDate: e.target.value })} disabled={isTesting}
-                                            className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2.5 text-base text-white font-mono font-bold focus:border-teal-500 focus:outline-none" />
+                                            className="w-full bg-slate-900 border border-slate-800 rounded-xl px-2 py-2.5 text-base text-white font-mono font-bold focus:border-teal-500 focus:outline-none" />
                                     </div>
                                     
-                                    <div className="col-span-2 flex flex-col gap-1">
+                                    <div className="flex flex-col gap-1">
                                         <label className="lg:hidden text-xs text-slate-400 font-bold uppercase">股票代碼</label>
                                         <div className="flex flex-col xl:flex-row gap-2 items-start xl:items-center">
                                             <input type="text" placeholder="代碼" value={row.stockId} onChange={e => updateRow(row.id, { stockId: e.target.value })} disabled={isTesting}
@@ -243,19 +243,19 @@ export default function MockTradingModal({ isOpen, onClose, snapshot }: MockTrad
                                         </div>
                                     </div>
 
-                                    <div className="col-span-1 flex flex-col gap-1">
+                                    <div className="flex flex-col gap-1">
                                         <label className="lg:hidden text-xs text-slate-400 font-bold uppercase">買入價</label>
                                         <input type="number" placeholder="價格" value={row.buyPrice} onChange={e => updateRow(row.id, { buyPrice: e.target.value })} disabled={isTesting}
                                             className="w-full bg-slate-900 border border-slate-800 rounded-xl px-2 py-2.5 text-base text-white font-mono font-bold focus:border-teal-500 focus:outline-none text-center" />
                                     </div>
 
-                                    <div className="col-span-1 flex flex-col gap-1">
+                                    <div className="flex flex-col gap-1">
                                         <label className="lg:hidden text-xs text-slate-400 font-bold uppercase">買入股數</label>
                                         <input type="number" placeholder="股數" value={row.buyShares} onChange={e => updateRow(row.id, { buyShares: e.target.value })} disabled={isTesting}
                                             className="w-full bg-slate-900 border border-slate-800 rounded-xl px-2 py-2.5 text-base text-white font-mono font-bold focus:border-teal-500 focus:outline-none text-center" />
                                     </div>
 
-                                    <div className="col-span-1 flex flex-col gap-1">
+                                    <div className="flex flex-col gap-1">
                                         <label className="lg:hidden text-xs text-slate-400 font-bold uppercase">停利目標 %</label>
                                         <select value={row.targetPercent} onChange={e => updateRow(row.id, { targetPercent: e.target.value })} disabled={isTesting}
                                             className="w-full bg-slate-900 border border-slate-800 rounded-xl px-1 py-2.5 text-base text-white font-mono font-bold focus:border-teal-500 focus:outline-none text-center appearance-none">
@@ -269,7 +269,7 @@ export default function MockTradingModal({ isOpen, onClose, snapshot }: MockTrad
                                         </select>
                                     </div>
 
-                                    <div className="col-span-1 flex flex-col gap-1">
+                                    <div className="flex flex-col gap-1">
                                         <label className="lg:hidden text-xs text-slate-400 font-bold uppercase">預計賣出價</label>
                                         <input type="number" placeholder="目標價" value={row.sellPrice} disabled={isTesting || row.targetPercent !== 'manual'}
                                             onChange={e => updateRow(row.id, { sellPrice: e.target.value })}
@@ -281,7 +281,7 @@ export default function MockTradingModal({ isOpen, onClose, snapshot }: MockTrad
                                             )} />
                                     </div>
 
-                                    <div className="col-span-2 flex flex-col items-center justify-center gap-1">
+                                    <div className="flex flex-col items-center justify-center gap-1">
                                         {row.status === 'idle' && <span className="text-sm text-slate-500 font-bold">尚未回測</span>}
                                         {row.status === 'testing' && <span className="text-sm text-teal-400 flex items-center gap-1 font-bold"><div className="w-4 h-4 border-2 border-teal-500/30 border-t-teal-400 rounded-full animate-spin" /> 回測中</span>}
                                         {row.status === 'success' && (
@@ -304,7 +304,7 @@ export default function MockTradingModal({ isOpen, onClose, snapshot }: MockTrad
                                         )}
                                     </div>
 
-                                    <div className="col-span-1 flex flex-col gap-1 items-end lg:items-center">
+                                    <div className="flex flex-col gap-1 items-end lg:items-center">
                                         <label className="lg:hidden text-xs text-slate-400 font-bold uppercase">單筆獲利</label>
                                         <span className={clsx(
                                             "text-lg font-black font-mono",
@@ -314,7 +314,7 @@ export default function MockTradingModal({ isOpen, onClose, snapshot }: MockTrad
                                         </span>
                                     </div>
 
-                                    <div className="col-span-1 flex justify-end lg:justify-center">
+                                    <div className="flex justify-end lg:justify-center">
                                         <button onClick={() => handleRemoveRow(row.id)} disabled={isTesting}
                                             className="p-2 bg-slate-900 border border-slate-800 hover:bg-rose-500/10 hover:border-rose-500/30 hover:text-rose-400 text-slate-500 rounded-xl transition-all disabled:opacity-50">
                                             <Trash2 className="w-4 h-4" />
