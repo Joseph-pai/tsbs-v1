@@ -5,6 +5,8 @@ import { X, Play, Plus, Trash2, TrendingUp, AlertTriangle, CheckCircle2, XCircle
 import { StockData } from '@/types';
 import clsx from 'clsx';
 import { format, subDays } from 'date-fns';
+import { useAuth } from '@/lib/firebase/context/AuthContext';
+import { saveMockTradingData, getMockTradingData } from '@/services/firebaseDb';
 
 interface MockTradingModalProps {
     isOpen: boolean;
@@ -47,21 +49,49 @@ export default function MockTradingModal({ isOpen, onClose, snapshot }: MockTrad
         stockName: '',
         buyPrice: '',
         buyShares: '1000',
-        targetPercent: '5', // 預設 +5%
+        targetPercent: '10', // 預設 +10%
         sellPrice: '',
         status: 'idle',
         profit: null,
         message: null
     });
 
+    const { user } = useAuth();
     const [rows, setRows] = useState<TradeRow[]>([]);
     const [isTesting, setIsTesting] = useState(false);
+    const [isLoaded, setIsLoaded] = useState(false);
 
     useEffect(() => {
-        if (isOpen && rows.length === 0) {
-            setRows([createEmptyRow()]);
+        if (isOpen) {
+            if (user && !isLoaded) {
+                getMockTradingData(user.uid).then(data => {
+                    if (data && data.length > 0) {
+                        setRows(data);
+                    } else {
+                        setRows([createEmptyRow()]);
+                    }
+                    setIsLoaded(true);
+                }).catch(e => {
+                    console.error("Failed to load mock trading data", e);
+                    setRows([createEmptyRow()]);
+                    setIsLoaded(true);
+                });
+            } else if (!user && rows.length === 0) {
+                setRows([createEmptyRow()]);
+                setIsLoaded(true);
+            }
         }
-    }, [isOpen]);
+    }, [isOpen, user, isLoaded]);
+
+    useEffect(() => {
+        if (isLoaded && user) {
+            // 測試中暫不存檔，避免頻繁寫入，測試完成後會自動存檔
+            const hasTesting = rows.some(r => r.status === 'testing');
+            if (!hasTesting) {
+                saveMockTradingData(user.uid, rows).catch(console.error);
+            }
+        }
+    }, [rows, isLoaded, user]);
 
     if (!isOpen) return null;
 
@@ -259,12 +289,16 @@ export default function MockTradingModal({ isOpen, onClose, snapshot }: MockTrad
                                         <label className="lg:hidden text-xs text-slate-400 font-bold uppercase">停利目標 %</label>
                                         <select value={row.targetPercent} onChange={e => updateRow(row.id, { targetPercent: e.target.value })} disabled={isTesting}
                                             className="w-full bg-slate-900 border border-slate-800 rounded-xl px-1 py-2.5 text-base text-white font-mono font-bold focus:border-teal-500 focus:outline-none text-center appearance-none">
-                                            <option value="2">+2%</option>
-                                            <option value="3">+3%</option>
-                                            <option value="5">+5%</option>
                                             <option value="10">+10%</option>
-                                            <option value="15">+15%</option>
                                             <option value="20">+20%</option>
+                                            <option value="30">+30%</option>
+                                            <option value="40">+40%</option>
+                                            <option value="50">+50%</option>
+                                            <option value="60">+60%</option>
+                                            <option value="70">+70%</option>
+                                            <option value="80">+80%</option>
+                                            <option value="90">+90%</option>
+                                            <option value="100">+100%</option>
                                             <option value="manual">手動</option>
                                         </select>
                                     </div>

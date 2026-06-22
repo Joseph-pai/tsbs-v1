@@ -1,5 +1,5 @@
 import { db } from "@/lib/firebase/config";
-import { collection, addDoc, getDocs, query, orderBy, serverTimestamp, deleteDoc, updateDoc, doc, writeBatch } from "firebase/firestore";
+import { collection, addDoc, getDocs, query, orderBy, serverTimestamp, deleteDoc, updateDoc, doc, writeBatch, setDoc, getDoc } from "firebase/firestore";
 
 export const saveScanRecord = async (userId: string, scanData: any, conditionDesc: string) => {
   try {
@@ -98,3 +98,31 @@ export const updateScanRecord = async (userId: string, recordId: string, updated
     throw e;
   }
 };
+
+export const saveMockTradingData = async (userId: string, rows: any[]) => {
+  try {
+    const docRef = doc(db, `users/${userId}/sandbox`, "mock_trades");
+    await setDoc(docRef, {
+      rows,
+      updatedAt: serverTimestamp(),
+    });
+  } catch (e) {
+    console.error("Error saving mock trading data: ", e);
+    throw e;
+  }
+};
+
+export const getMockTradingData = async (userId: string) => {
+  try {
+    const docRef = doc(db, `users/${userId}/sandbox`, "mock_trades");
+    const docSnap = await getDoc(docRef);
+    if (docSnap.exists()) {
+      return docSnap.data().rows || [];
+    }
+    return [];
+  } catch (e) {
+    console.error("Error getting mock trading data: ", e);
+    throw e;
+  }
+};
+
