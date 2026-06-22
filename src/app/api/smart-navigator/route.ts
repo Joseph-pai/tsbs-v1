@@ -149,7 +149,11 @@ export async function GET(request: Request) {
 
         // Calculate MACD
         const macdData = calculateMACD(closePrices);
-        const isMacdPositive = macdData ? macdData.dif > 0 : false;
+        // Anti-lag: use OSC (Histogram) direction instead of DIF zero-cross.
+        // OSC > 0 AND expanding (OSC slope positive) confirms momentum ~1-2 bars earlier than DIF > 0.
+        const isMacdPositive = macdData
+            ? (macdData.osc > 0 && macdData.osc > macdData.prevOsc)
+            : false;
 
         // Calculate Position %
         const periodPrices = reversedClose.slice(0, period);
@@ -245,14 +249,16 @@ export async function GET(request: Request) {
 
         // === Distribution Warning: Three Precursor Signals ===
 
-        // Precursor A: MACD Top Divergence (MACD頂背離)
-        // Price at or above a recent high, but DIF is lower than at that peak
+        // Precursor A: MACD Top Divergence — uses oscArray (Histogram) instead of difArray.
+        // OSC divergence is detected 1~2 bars earlier than DIF divergence,
+        // because the histogram is the most responsive component of MACD.
         let hasMacdDivergence = false;
         const macdFull = calculateMACDFull(closePrices);
         if (macdFull && closePrices.length >= 26) {
             const lookback = 20;
             const recentPrices = closePrices.slice(-lookback);
-            const recentDif = macdFull.difArray.slice(-lookback);
+            // Use oscArray for earlier divergence detection
+            const recentOsc = macdFull.oscArray.slice(-lookback);
             let prevPeakIdx = -1;
             let prevPeakPrice = -Infinity;
             for (let i = 1; i < lookback - 2; i++) {
@@ -265,9 +271,10 @@ export async function GET(request: Request) {
             }
             if (prevPeakIdx !== -1) {
                 const currentPrice = recentPrices[lookback - 1];
-                const currentDif = recentDif[lookback - 1];
-                const prevPeakDif = recentDif[prevPeakIdx];
-                hasMacdDivergence = currentPrice >= prevPeakPrice * 0.98 && currentDif < prevPeakDif;
+                const currentOsc = recentOsc[lookback - 1];
+                const prevPeakOsc = recentOsc[prevPeakIdx];
+                // Price at or above prior high, but OSC (histogram) lower than at that peak
+                hasMacdDivergence = currentPrice >= prevPeakPrice * 0.98 && currentOsc < prevPeakOsc;
             }
         }
 
@@ -396,12 +403,21 @@ export async function GET(request: Request) {
         const isModerateVolume = avg20Turnover > 0
             ? turnoverRate > avg20Turnover * 1.2 && turnoverRate <= avg20Turnover * 2
             : false;
-        // MACD just turned positive: prev DIF < 0, current DIF >= 0
+        // MACD just turned positive (anti-lag version):
+        // Uses OSC (Histogram) zero-cross instead of DIF zero-cross.
+        // OSC flips positive ~1-2 bars BEFORE DIF crosses zero, reducing signal lag.
+        // Secondary condition: OSC expanding for 2+ consecutive bars (filters false positives).
         let isMacdJustTurnedPositive = false;
-        if (macdFull && macdFull.difArray.length >= 2) {
-            const prevDif = macdFull.difArray[macdFull.difArray.length - 2];
-            const currDif = macdFull.difArray[macdFull.difArray.length - 1];
-            isMacdJustTurnedPositive = prevDif < 0 && currDif >= 0;
+        if (macdFull && macdFull.oscArray.length >= 3) {
+            const oscLen = macdFull.oscArray.length;
+            const osc0 = macdFull.oscArray[oscLen - 3]; // 2 bars ago
+            const osc1 = macdFull.oscArray[oscLen - 2]; // 1 bar ago
+            const osc2 = macdFull.oscArray[oscLen - 1]; // latest
+            // Primary: OSC crossed from negative to positive (zero-cross)
+            const oscJustCrossed = osc1 < 0 && osc2 >= 0;
+            // Secondary: OSC expanding upward for 2 bars (momentum building, filters false positives)
+            const oscExpanding2Bars = osc2 > 0 && osc2 > osc1 && osc1 > osc0;
+            isMacdJustTurnedPositive = oscJustCrossed || oscExpanding2Bars;
         }
 
         // 【強化4】計算 KD 指標與底背離

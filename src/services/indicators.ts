@@ -96,12 +96,35 @@ export const calculatePOC = (prices: any[], period: number = 20): number => {
 
 /**
  * Calculate Exponential Moving Average (EMA)
+ * Uses SMA Seeding: the first EMA value is initialized with SMA(period)
+ * to eliminate the warm-up bias from using a single price as the starting point.
+ * This reduces EMA lag in early periods and makes MACD more accurate.
  */
 export const calculateEMA = (prices: number[], period: number): number[] => {
     if (prices.length === 0) return [];
     const k = 2 / (period + 1);
-    const emaArray = [prices[0]];
-    for (let i = 1; i < prices.length; i++) {
+    const emaArray: number[] = [];
+
+    // SMA Seeding: use the average of the first `period` prices as the seed value
+    // to eliminate the warm-up period distortion.
+    if (prices.length < period) {
+        // Not enough data for seeding — fall back to first-price initialization
+        emaArray.push(prices[0]);
+        for (let i = 1; i < prices.length; i++) {
+            emaArray.push(prices[i] * k + emaArray[i - 1] * (1 - k));
+        }
+        return emaArray;
+    }
+
+    // Fill leading slots with null-equivalent using SMA of first `period` values as seed
+    const seedSma = prices.slice(0, period).reduce((a, b) => a + b, 0) / period;
+    // Pad the array so indices align with the original prices array
+    for (let i = 0; i < period - 1; i++) {
+        emaArray.push(seedSma); // placeholder to maintain index alignment
+    }
+    emaArray.push(seedSma); // index [period - 1] = seed EMA
+
+    for (let i = period; i < prices.length; i++) {
         emaArray.push(prices[i] * k + emaArray[i - 1] * (1 - k));
     }
     return emaArray;
@@ -109,7 +132,8 @@ export const calculateEMA = (prices: number[], period: number): number[] => {
 
 /**
  * Calculate MACD
- * Returns the latest { dif, macd, osc } or null
+ * Returns the latest { dif, macd, osc, prevOsc } or null.
+ * prevOsc is the OSC value one bar prior — used for OSC slope / momentum direction checks.
  */
 export const calculateMACD = (prices: number[], shortPeriod = 12, longPeriod = 26, signalPeriod = 9) => {
     if (prices.length < longPeriod) return null;
@@ -117,7 +141,7 @@ export const calculateMACD = (prices: number[], shortPeriod = 12, longPeriod = 2
     const emaShort = calculateEMA(prices, shortPeriod);
     const emaLong = calculateEMA(prices, longPeriod);
     
-    const difArray = [];
+    const difArray: number[] = [];
     for (let i = 0; i < prices.length; i++) {
         difArray.push(emaShort[i] - emaLong[i]);
     }
@@ -127,17 +151,25 @@ export const calculateMACD = (prices: number[], shortPeriod = 12, longPeriod = 2
     const latestDif = difArray[difArray.length - 1];
     const latestMacd = macdArray[macdArray.length - 1];
     const latestOsc = latestDif - latestMacd; // MACD Histogram (OSC)
+
+    // prevOsc: one bar before, used to determine if OSC is expanding (slope > 0)
+    const prevDif = difArray.length >= 2 ? difArray[difArray.length - 2] : latestDif;
+    const prevMacd = macdArray.length >= 2 ? macdArray[macdArray.length - 2] : latestMacd;
+    const prevOsc = prevDif - prevMacd;
     
     return {
         dif: latestDif,
         macd: latestMacd,
-        osc: latestOsc
+        osc: latestOsc,
+        prevOsc,   // OSC of previous bar — for slope/direction detection
     };
 };
 
 /**
  * Calculate MACD Full History
- * Returns full difArray and macdArray for divergence analysis.
+ * Returns full difArray, macdArray, and oscArray for divergence analysis.
+ * oscArray (Histogram) is the most sensitive part of MACD —
+ * used for OSC top-divergence detection which leads DIF divergence by 1~2 bars.
  * Does NOT replace calculateMACD — this is an extended version for advanced signals.
  */
 export const calculateMACDFull = (prices: number[], shortPeriod = 12, longPeriod = 26, signalPeriod = 9) => {
@@ -146,7 +178,9 @@ export const calculateMACDFull = (prices: number[], shortPeriod = 12, longPeriod
     const emaLong = calculateEMA(prices, longPeriod);
     const difArray = prices.map((_, i) => emaShort[i] - emaLong[i]);
     const macdArray = calculateEMA(difArray, signalPeriod);
-    return { difArray, macdArray };
+    // oscArray (Histogram): most responsive component, leads DIF by 1~2 bars
+    const oscArray = difArray.map((dif, i) => dif - macdArray[i]);
+    return { difArray, macdArray, oscArray };
 };
 
 /**
