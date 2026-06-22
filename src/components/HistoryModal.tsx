@@ -169,6 +169,11 @@ export default function HistoryModal({ isOpen, onClose }: HistoryModalProps) {
     scanRecords.forEach(r => {
       if (r.createdAt?.seconds) {
         s.add(format(new Date(r.createdAt.seconds * 1000), 'yyyy-MM-dd'));
+      } else if (r.scanDate) {
+        s.add(r.scanDate);
+      } else if (r.date) {
+        // Fallback for very old records
+        s.add(r.date.split(' ')[0]);
       }
     });
     return s;
@@ -178,9 +183,15 @@ export default function HistoryModal({ isOpen, onClose }: HistoryModalProps) {
   const filteredScanRecords = useMemo(() => {
     if (selectedDates.size === 0) return scanRecords;
     return scanRecords.filter(r => {
-      if (!r.createdAt?.seconds) return false;
-      const d = format(new Date(r.createdAt.seconds * 1000), 'yyyy-MM-dd');
-      return selectedDates.has(d);
+      let d = '';
+      if (r.createdAt?.seconds) {
+        d = format(new Date(r.createdAt.seconds * 1000), 'yyyy-MM-dd');
+      } else if (r.scanDate) {
+        d = r.scanDate;
+      } else if (r.date) {
+        d = r.date.split(' ')[0];
+      }
+      return d ? selectedDates.has(d) : false;
     });
   }, [scanRecords, selectedDates]);
 
@@ -213,9 +224,15 @@ export default function HistoryModal({ isOpen, onClose }: HistoryModalProps) {
     // Collect IDs of records matching selected dates
     const idsToDelete = scanRecords
       .filter(r => {
-        if (!r.createdAt?.seconds) return false;
-        const d = format(new Date(r.createdAt.seconds * 1000), 'yyyy-MM-dd');
-        return selectedDates.has(d);
+        let d = '';
+        if (r.createdAt?.seconds) {
+          d = format(new Date(r.createdAt.seconds * 1000), 'yyyy-MM-dd');
+        } else if (r.scanDate) {
+          d = r.scanDate;
+        } else if (r.date) {
+          d = r.date.split(' ')[0];
+        }
+        return d ? selectedDates.has(d) : false;
       })
       .map(r => r.id);
 
@@ -413,7 +430,9 @@ export default function HistoryModal({ isOpen, onClose }: HistoryModalProps) {
                   {filteredScanRecords.map(record => (
                     <div key={record.id} className="bg-slate-950 p-4 rounded-xl border border-slate-800">
                       <div className="text-xs text-slate-400 mb-2">
-                         {record.createdAt?.seconds ? format(new Date(record.createdAt.seconds * 1000), 'yyyy/MM/dd HH:mm:ss') : 'N/A'}
+                         {record.createdAt?.seconds 
+                           ? format(new Date(record.createdAt.seconds * 1000), 'yyyy/MM/dd HH:mm:ss') 
+                           : (record.date || record.scanDate || 'N/A')}
                       </div>
                       <div className="text-sm text-slate-300 font-medium mb-2 break-all line-clamp-2">
                          條件: {record.conditionDesc}

@@ -1,6 +1,6 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
 import { getAuth, setPersistence, browserLocalPersistence } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
+import { getFirestore, initializeFirestore, enableIndexedDbPersistence } from "firebase/firestore";
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -14,10 +14,24 @@ const firebaseConfig = {
 
 const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 const auth = getAuth(app);
-const db = getFirestore(app);
+
+// 強制使用 Long Polling 避免 WebChannel 在某些網路環境/瀏覽器被阻擋 (ERR_ABORTED 400)
+let db;
+try {
+  db = initializeFirestore(app, { experimentalForceLongPolling: true });
+} catch (e) {
+  // 如果在 Next.js HMR 環境下已經初始化過，會跳到這
+  db = getFirestore(app);
+}
+
+// 啟用 Firestore 離線緩存 (IndexedDB)，解決重複讀取造成的額度消耗與網路延遲
+if (typeof window !== "undefined") {
+  enableIndexedDbPersistence(db).catch((err) => {
+    console.warn("Firestore persistence warning:", err);
+  });
+}
 
 // 全局設定持久化為 localStorage，確保關閉瀏覽器重開後仍維持登入
-// 這讓 Safari、其他電腦以及不同瀏覽器都能正確讀取 Firebase 歷史數據
 setPersistence(auth, browserLocalPersistence).catch(console.error);
 
 export { app, auth, db };
