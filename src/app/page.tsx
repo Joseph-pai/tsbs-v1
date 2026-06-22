@@ -4,7 +4,7 @@ import { StockCard } from '@/components/dashboard/StockCard';
 import { AnalysisResult, StockData, HistorySession } from '@/types';
 import { SECTORS, MarketType, MARKET_NAMES } from '@/lib/sectors';
 import { StockSearch } from '@/components/dashboard/StockSearch';
-import { Search, TrendingUp, Sparkles, Filter, Loader2, Flame, Settings, Target, BarChart3, Info, BookOpen, X, HelpCircle, AlertTriangle, History, Trash2, Calendar, FlaskConical, CheckCircle2, XCircle, LogOut, RefreshCw, Download, ChevronLeft, ChevronRight, CheckSquare, Square, Compass, Zap, Clock } from 'lucide-react';
+import { Search, TrendingUp, Sparkles, Filter, Loader2, Flame, Settings, Target, BarChart3, Info, BookOpen, X, HelpCircle, AlertTriangle, History, Trash2, Calendar, FlaskConical, CheckCircle2, XCircle, LogOut, RefreshCw, Download, ChevronLeft, ChevronRight, CheckSquare, Square, Compass, Zap, Clock, Activity } from 'lucide-react';
 import { useState, useMemo, useEffect } from 'react';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, getDay, addMonths, subMonths } from 'date-fns';
 import { useRouter } from 'next/navigation';
@@ -12,6 +12,7 @@ import { clsx } from 'clsx';
 import AuthGuard from '@/components/layout/AuthGuard';
 import HistoryModal from '@/components/HistoryModal';
 import PreOrderAssistantModal from '@/components/PreOrderAssistantModal';
+import MockTradingModal from '@/components/MockTradingModal';
 import { useAuth } from '@/lib/firebase/context/AuthContext';
 import { saveScanRecord, saveBacktestRecord, getScanRecords, deleteScanRecord, updateScanRecord } from '@/services/firebaseDb';
 import { auth } from '@/lib/firebase/config';
@@ -73,6 +74,7 @@ export default function DashboardPage() {
   const [showManual, setShowManual] = useState(false); // 新增使用說明狀態
   const [showHistory, setShowHistory] = useState(false); // 新增歷史紀錄狀態
   const [showPreOrderAssistant, setShowPreOrderAssistant] = useState(false); // 新增預約助理狀態
+  const [showMockTrading, setShowMockTrading] = useState(false); // 新增模擬交易狀態
   const [historyRecords, setHistoryRecords] = useState<HistorySession[]>([]);
   const [selectedStocks, setSelectedStocks] = useState<Record<string, string[]>>({});
   const [showBacktest, setShowBacktest] = useState(false);
@@ -872,6 +874,7 @@ export default function DashboardPage() {
     <AuthGuard>
       <HistoryModal isOpen={showHistory} onClose={() => setShowHistory(false)} />
       <PreOrderAssistantModal isOpen={showPreOrderAssistant} onClose={() => setShowPreOrderAssistant(false)} />
+      <MockTradingModal isOpen={showMockTrading} onClose={() => setShowMockTrading(false)} snapshot={snapshot} />
       <div className="container mx-auto px-6 py-12 max-w-3xl">
       {/* Header */}
       <header className="mb-14 text-center">
@@ -925,6 +928,14 @@ export default function DashboardPage() {
         >
           <Clock className="w-5 h-5 group-hover:scale-110 transition-transform" />
           12H 預約賣出助手
+        </button>
+
+        <button
+          onClick={() => setShowMockTrading(true)}
+          className="inline-flex items-center gap-2 px-5 py-2 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 hover:border-teal-500/50 transition-all text-teal-400 font-black mb-10 ml-4 group"
+        >
+          <Activity className="w-5 h-5 group-hover:scale-110 transition-transform" />
+          模擬交易
         </button>
 
         <button
