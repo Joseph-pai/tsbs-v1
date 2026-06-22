@@ -1,6 +1,6 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
 import { getAuth, setPersistence, browserLocalPersistence } from "firebase/auth";
-import { getFirestore, initializeFirestore, enableIndexedDbPersistence } from "firebase/firestore";
+import { getFirestore, initializeFirestore, enableIndexedDbPersistence, Firestore } from "firebase/firestore";
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -16,7 +16,7 @@ const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 const auth = getAuth(app);
 
 // 強制使用 Long Polling 避免 WebChannel 在某些網路環境/瀏覽器被阻擋 (ERR_ABORTED 400)
-let db;
+let db: Firestore;
 try {
   db = initializeFirestore(app, { experimentalForceLongPolling: true });
 } catch (e) {
