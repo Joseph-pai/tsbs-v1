@@ -203,6 +203,33 @@ export default function MockTradingModal({ isOpen, onClose, snapshot }: MockTrad
     const totalProfit = rows.reduce((sum, r) => sum + (r.profit || 0), 0);
     const successCount = rows.filter(r => r.status === 'success').length;
 
+    // 買入股票總成本：buyPrice × buyShares 加總（即時動態）
+    const totalBuyCost = rows.reduce((sum, r) => {
+        const price = parseFloat(r.buyPrice);
+        const shares = parseInt(r.buyShares, 10);
+        if (!isNaN(price) && !isNaN(shares) && shares > 0) {
+            return sum + price * shares;
+        }
+        return sum;
+    }, 0);
+
+    // 平均使用時間：只計算 status === 'success' 的行，從 message 擷取命中日期計算天數差平均
+    const avgDays = (() => {
+        const dateRegex = /於 (\d{4}-\d{2}-\d{2}) 達標/;
+        const durations: number[] = [];
+        rows.forEach(r => {
+            if (r.status !== 'success' || !r.message || !r.buyDate) return;
+            const match = r.message.match(dateRegex);
+            if (!match) return;
+            const buyTime = new Date(r.buyDate).getTime();
+            const hitTime = new Date(match[1]).getTime();
+            const days = Math.round((hitTime - buyTime) / (1000 * 60 * 60 * 24));
+            if (days >= 0) durations.push(days);
+        });
+        if (durations.length === 0) return null;
+        return Math.round(durations.reduce((a, b) => a + b, 0) / durations.length);
+    })();
+
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
             <div className="absolute inset-0 bg-black/80 backdrop-blur-sm transition-opacity" onClick={onClose} />
@@ -375,7 +402,7 @@ export default function MockTradingModal({ isOpen, onClose, snapshot }: MockTrad
 
                 {/* Footer */}
                 <div className="p-6 border-t border-slate-800/80 bg-slate-950 flex flex-col sm:flex-row items-center justify-between gap-4">
-                    <div className="flex items-center gap-6 w-full sm:w-auto bg-slate-900 px-6 py-4 rounded-2xl border border-slate-800">
+                    <div className="flex flex-wrap items-center gap-4 w-full sm:w-auto bg-slate-900 px-6 py-4 rounded-2xl border border-slate-800">
                         <div>
                             <span className="text-[10px] text-slate-500 font-bold uppercase tracking-widest block mb-1">達標勝率</span>
                             <span className="text-xl font-black text-white">{rows.length > 0 ? Math.round((successCount / rows.length) * 100) : 0}%</span>
@@ -386,6 +413,20 @@ export default function MockTradingModal({ isOpen, onClose, snapshot }: MockTrad
                             <span className="text-[10px] text-slate-500 font-bold uppercase tracking-widest block mb-1">總計模擬獲利</span>
                             <span className={clsx("text-2xl font-black font-mono", totalProfit > 0 ? "text-emerald-400" : "text-white")}>
                                 ${totalProfit.toLocaleString()}
+                            </span>
+                        </div>
+                        <div className="w-px h-10 bg-slate-800"></div>
+                        <div>
+                            <span className="text-[10px] text-slate-500 font-bold uppercase tracking-widest block mb-1">買入總成本</span>
+                            <span className="text-xl font-black font-mono text-amber-400">
+                                ${totalBuyCost > 0 ? totalBuyCost.toLocaleString() : '0'}
+                            </span>
+                        </div>
+                        <div className="w-px h-10 bg-slate-800"></div>
+                        <div>
+                            <span className="text-[10px] text-slate-500 font-bold uppercase tracking-widest block mb-1">平均達標天數</span>
+                            <span className="text-xl font-black text-sky-400">
+                                {avgDays !== null ? `${avgDays} 天` : '—'}
                             </span>
                         </div>
                     </div>
