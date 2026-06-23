@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { X, Play, Plus, Trash2, TrendingUp, AlertTriangle, CheckCircle2, XCircle, Calculator, Activity, DollarSign, Clock } from 'lucide-react';
 import { StockData } from '@/types';
 import clsx from 'clsx';
@@ -60,6 +60,7 @@ export default function MockTradingModal({ isOpen, onClose, snapshot }: MockTrad
     const [rows, setRows] = useState<TradeRow[]>([]);
     const [isTesting, setIsTesting] = useState(false);
     const [isLoaded, setIsLoaded] = useState(false);
+    const hasModified = useRef(false);
 
     useEffect(() => {
         if (isOpen) {
@@ -84,7 +85,9 @@ export default function MockTradingModal({ isOpen, onClose, snapshot }: MockTrad
     }, [isOpen, user, isLoaded]);
 
     useEffect(() => {
-        if (isLoaded && user) {
+        // 只有當使用者手動修改過資料，且讀取已完成、且沒有在回測時，才進行自動存檔
+        // 這避免了 Safari 在讀取失敗時，將預設的空資料覆寫到資料庫中
+        if (isLoaded && user && hasModified.current) {
             // 測試中暫不存檔，避免頻繁寫入，測試完成後會自動存檔
             const hasTesting = rows.some(r => r.status === 'testing');
             if (!hasTesting) {
@@ -96,14 +99,17 @@ export default function MockTradingModal({ isOpen, onClose, snapshot }: MockTrad
     if (!isOpen) return null;
 
     const handleAddRow = () => {
+        hasModified.current = true;
         setRows([...rows, createEmptyRow()]);
     };
 
     const handleRemoveRow = (id: string) => {
+        hasModified.current = true;
         setRows(rows.filter(r => r.id !== id));
     };
 
     const updateRow = (id: string, updates: Partial<TradeRow>) => {
+        hasModified.current = true;
         setRows(prev => prev.map(r => {
             if (r.id !== id) return r;
             const updated = { ...r, ...updates };
@@ -188,6 +194,7 @@ export default function MockTradingModal({ isOpen, onClose, snapshot }: MockTrad
                 updatedRows[i] = { ...row, status: 'error', message: '請求發生錯誤' };
             }
             // 每次跑完一行就更新 UI
+            hasModified.current = true;
             setRows([...updatedRows]);
         }
         setIsTesting(false);

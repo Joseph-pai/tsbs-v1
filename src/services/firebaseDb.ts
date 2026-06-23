@@ -1,5 +1,5 @@
 import { db } from "@/lib/firebase/config";
-import { collection, addDoc, getDocs, query, orderBy, serverTimestamp, deleteDoc, updateDoc, doc, writeBatch, setDoc, getDoc } from "firebase/firestore";
+import { collection, addDoc, getDocs, query, orderBy, serverTimestamp, deleteDoc, updateDoc, doc, writeBatch, setDoc, getDoc, getDocFromServer } from "firebase/firestore";
 
 export const saveScanRecord = async (userId: string, scanData: any, conditionDesc: string) => {
   try {
@@ -115,7 +115,7 @@ export const saveMockTradingData = async (userId: string, rows: any[]) => {
 export const getMockTradingData = async (userId: string) => {
   try {
     const docRef = doc(db, `users/${userId}/sandbox`, "mock_trades");
-    const docSnap = await getDoc(docRef);
+    const docSnap = await getDocFromServer(docRef);
     if (docSnap.exists()) {
       return docSnap.data().rows || [];
     }
