@@ -95,6 +95,7 @@ export default function DashboardPage() {
   const [enhancedResults, setEnhancedResults] = useState<AnalysisResult[]>([]);
   const [isEnhancedScanning, setIsEnhancedScanning] = useState(false);
   const [enhancedProgress, setEnhancedProgress] = useState({ current: 0, total: 0, phase: '' });
+  const [hasEnhancedScanned, setHasEnhancedScanned] = useState(false);
   const [activeTab, setActiveTab] = useState<'original' | 'enhanced' | 'shortterm'>('original');
   const [backtestScanMode, setBacktestScanMode] = useState<'original' | 'enhanced'>('original');
 
@@ -103,6 +104,7 @@ export default function DashboardPage() {
   const [isShortTermScanning, setIsShortTermScanning] = useState(false);
   const [shortTermProgress, setShortTermProgress] = useState({ current: 0, total: 0, phase: '' });
   const [shortTermMeta, setShortTermMeta] = useState<any>(null);
+  const [hasShortTermScanned, setHasShortTermScanned] = useState(false);
 
   const handleLogout = async () => {
     try {
@@ -701,6 +703,7 @@ export default function DashboardPage() {
   // ────────────────────────────────────────────────
   const runEnhancedScan = async () => {
     setIsEnhancedScanning(true);
+    setHasEnhancedScanned(false);
     setActiveTab('enhanced');
     setEnhancedProgress({ current: 0, total: 0, phase: '正在獲取市場快照...' });
     const t0 = Date.now();
@@ -779,6 +782,7 @@ export default function DashboardPage() {
         .sort((a, b) => (b.potential_score || 0) - (a.potential_score || 0));
 
       setEnhancedResults(filteredEnhanced);
+      setHasEnhancedScanned(true);
 
       // 儲存至 Firebase（標記為 enhanced 模式）
       if (user && filteredEnhanced.length > 0) {
@@ -826,6 +830,7 @@ export default function DashboardPage() {
   // ────────────────────────────────────────────────
   const runShortTermScan = async () => {
     setIsShortTermScanning(true);
+    setHasShortTermScanned(false);
     setActiveTab('shortterm');
     setShortTermResults([]);
     setShortTermMeta(null);
@@ -842,6 +847,7 @@ export default function DashboardPage() {
       setShortTermProgress({ current: 200, total: 200, phase: `短線掃描完成：找到 ${json.count} 支` });
       setShortTermResults(json.data || []);
       setShortTermMeta(json.meta || null);
+      setHasShortTermScanned(true);
 
     } catch (e: any) {
       console.error('[ShortTermScan]', e);
@@ -1413,11 +1419,17 @@ export default function DashboardPage() {
         {/* 強化評分結果 */}
         {activeTab === 'enhanced' && (
           <>
-            {filteredEnhancedResults.length === 0 && !isEnhancedScanning ? (
+            {filteredEnhancedResults.length === 0 && !isEnhancedScanning && !hasEnhancedScanned ? (
               <div className="py-40 text-center border-4 border-dashed border-purple-900/30 rounded-[4rem] bg-purple-500/5 px-10">
                 <div className="text-8xl mb-8">⚡</div>
                 <p className="text-purple-400 font-black text-4xl mb-4">尚未執行強化掃描</p>
                 <p className="text-slate-500 text-xl font-black">請按「強化評分掃描」按鈕</p>
+              </div>
+            ) : filteredEnhancedResults.length === 0 && !isEnhancedScanning && hasEnhancedScanned ? (
+              <div className="py-40 text-center border-4 border-dashed border-purple-900/30 rounded-[4rem] bg-purple-500/5 px-10">
+                <div className="text-9xl mb-10">🔍</div>
+                <p className="text-purple-400 font-black text-5xl mb-6 leading-tight">沒有找到符合強化評分的股票</p>
+                <p className="text-slate-500 text-2xl font-black leading-relaxed">請等待市場輪動或放寬搜尋條件。</p>
               </div>
             ) : filteredEnhancedResults.length > 0 ? (
               <div className="relative animate-in fade-in slide-in-from-bottom-8 duration-700">
@@ -1466,7 +1478,7 @@ export default function DashboardPage() {
         {/* 短線過濾掃描結果 */}
         {activeTab === 'shortterm' && (
           <>
-            {shortTermResults.length === 0 && !isShortTermScanning ? (
+            {shortTermResults.length === 0 && !isShortTermScanning && !hasShortTermScanned ? (
               <div className="py-40 text-center border-4 border-dashed border-orange-900/30 rounded-[4rem] bg-orange-500/5 px-10">
                 <div className="text-8xl mb-8">📡</div>
                 <p className="text-orange-400 font-black text-4xl mb-4">尚未執行短線過濾掃描</p>
@@ -1481,6 +1493,18 @@ export default function DashboardPage() {
                     <li>⑤ 60 日股價位階過濾 → &gt;80% 直接排除</li>
                     <li>⑥ 成交量型態質化 → 必須有前期縮量</li>
                   </ul>
+                </div>
+              </div>
+            ) : shortTermResults.length === 0 && !isShortTermScanning && hasShortTermScanned ? (
+              <div className="py-40 text-center border-4 border-dashed border-orange-900/30 rounded-[4rem] bg-orange-500/5 px-10">
+                <div className="text-9xl mb-10">🔍</div>
+                <p className="text-orange-400 font-black text-5xl mb-6 leading-tight">今日無符合標的</p>
+                <div className="max-w-md mx-auto space-y-6">
+                  <p className="text-slate-400 text-xl font-medium leading-relaxed">
+                    大盤位階: <span className="text-white font-black">{shortTermMeta?.marketLevel ? (shortTermMeta.marketLevel * 100).toFixed(1) : '--'}%</span> ({shortTermMeta?.marketMode === 'normal' ? '正常模式' : shortTermMeta?.marketMode === 'strict' ? '嚴格模式' : shortTermMeta?.marketMode === 'extreme' ? '極嚴格模式' : '未知'})<br/><br/>
+                    在嚴格的 VCP 收縮與位階過濾下，目前市場未出現符合短線爆發條件的個股。<br/><br/>
+                    <span className="text-orange-500/70 text-base">（註：六大策略為極度嚴格之短線訊號，無標的為正常現象，請耐心等待市場輪動或重新評估大盤風險）</span>
+                  </p>
                 </div>
               </div>
             ) : shortTermResults.length > 0 ? (
