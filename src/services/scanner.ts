@@ -287,7 +287,8 @@ export const ScannerService = {
      */
     scanShortTerm: async (
         market: 'TWSE' | 'TPEX' = 'TWSE',
-        sector?: string
+        sector?: string,
+        userMode: 'auto' | 'loose' | 'medium' | 'strict' = 'auto'
     ): Promise<{
         results: AnalysisResult[];
         meta: {
@@ -362,18 +363,33 @@ export const ScannerService = {
         let volThreshold: number;   // 量能門檻倍數
         let breakoutThreshold: number; // 突破幅度門檻
 
-        if (marketLevel < 0.60) {
+        if (userMode === 'loose') {
             marketMode = 'normal';
             volThreshold = 2.5;
             breakoutThreshold = 0.035;
-        } else if (marketLevel <= 0.80) {
+        } else if (userMode === 'medium') {
             marketMode = 'strict';
             volThreshold = 3.5;
             breakoutThreshold = 0.05;
-        } else {
+        } else if (userMode === 'strict') {
             marketMode = 'extreme';
             volThreshold = 5.0;
             breakoutThreshold = 0.05;
+        } else {
+            // 自動模式：依據大盤位階決定
+            if (marketLevel < 0.60) {
+                marketMode = 'normal';
+                volThreshold = 2.5;
+                breakoutThreshold = 0.035;
+            } else if (marketLevel <= 0.80) {
+                marketMode = 'strict';
+                volThreshold = 3.5;
+                breakoutThreshold = 0.05;
+            } else {
+                marketMode = 'extreme';
+                volThreshold = 5.0;
+                breakoutThreshold = 0.05;
+            }
         }
 
         console.log(`[ShortTermScan] 大盤位階: ${(marketLevel * 100).toFixed(1)}% → 模式: ${marketMode} (V門檻: ${volThreshold}x, 突破: ${(breakoutThreshold * 100).toFixed(1)}%)`);

@@ -105,6 +105,7 @@ export default function DashboardPage() {
   const [shortTermProgress, setShortTermProgress] = useState({ current: 0, total: 0, phase: '' });
   const [shortTermMeta, setShortTermMeta] = useState<any>(null);
   const [hasShortTermScanned, setHasShortTermScanned] = useState(false);
+  const [shortTermUserMode, setShortTermUserMode] = useState<'auto' | 'loose' | 'medium' | 'strict'>('auto');
 
   const handleLogout = async () => {
     try {
@@ -839,7 +840,7 @@ export default function DashboardPage() {
     try {
       setShortTermProgress({ current: 20, total: 200, phase: '正在預篩選候選股...' });
 
-      const res = await fetch(`/api/scan/short-term?market=${market}&sector=${sector}`);
+      const res = await fetch(`/api/scan/short-term?market=${market}&sector=${sector}&mode=${shortTermUserMode}`);
       const json = await res.json();
 
       if (!json.success) throw new Error(json.error || '短線掃描失敗');
@@ -1165,6 +1166,53 @@ export default function DashboardPage() {
               </div>
             </div>
           )}
+        </div>
+      </div>
+
+      {/* 短線模式選擇 */}
+      <div className="flex flex-wrap items-center justify-end gap-3 mb-4">
+        <span className="text-sm font-bold text-slate-400">短線大盤濾網模式：</span>
+        <div className="flex bg-slate-900 border border-slate-700 rounded-xl overflow-hidden shadow-inner">
+          <button
+            onClick={() => setShortTermUserMode('auto')}
+            className={clsx(
+              "px-4 py-2 text-sm font-black transition-colors",
+              shortTermUserMode === 'auto' ? "bg-orange-500 text-white" : "text-slate-400 hover:text-white"
+            )}
+            title="依據大盤位階自動切換"
+          >
+            自動 (推薦)
+          </button>
+          <button
+            onClick={() => setShortTermUserMode('loose')}
+            className={clsx(
+              "px-4 py-2 text-sm font-black transition-colors border-l border-slate-700",
+              shortTermUserMode === 'loose' ? "bg-emerald-500 text-white" : "text-slate-400 hover:text-white"
+            )}
+            title="無視大盤高低，強制使用最寬鬆門檻"
+          >
+            寬鬆
+          </button>
+          <button
+            onClick={() => setShortTermUserMode('medium')}
+            className={clsx(
+              "px-4 py-2 text-sm font-black transition-colors border-l border-slate-700",
+              shortTermUserMode === 'medium' ? "bg-amber-500 text-white" : "text-slate-400 hover:text-white"
+            )}
+            title="強制使用中等門檻"
+          >
+            中等
+          </button>
+          <button
+            onClick={() => setShortTermUserMode('strict')}
+            className={clsx(
+              "px-4 py-2 text-sm font-black transition-colors border-l border-slate-700",
+              shortTermUserMode === 'strict' ? "bg-red-500 text-white" : "text-slate-400 hover:text-white"
+            )}
+            title="強制使用極嚴格門檻"
+          >
+            嚴格
+          </button>
         </div>
       </div>
 

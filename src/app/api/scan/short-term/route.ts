@@ -11,10 +11,11 @@ export async function GET(req: Request) {
         const { searchParams } = new URL(req.url);
         const market = (searchParams.get('market') || 'TWSE') as 'TWSE' | 'TPEX';
         const sector = searchParams.get('sector') || undefined;
+        const mode = (searchParams.get('mode') || 'auto') as 'auto' | 'loose' | 'medium' | 'strict';
 
-        console.log(`[ShortTermAPI] 開始短線過濾掃描: market=${market}`);
+        console.log(`[ShortTermAPI] 開始短線過濾掃描: market=${market}, mode=${mode}`);
 
-        const { results, meta, timing } = await ScannerService.scanShortTerm(market, sector);
+        const { results, meta, timing } = await ScannerService.scanShortTerm(market, sector, mode);
 
         console.log(`[ShortTermAPI] 完成: ${results.length} 支通過，品質等級: ${meta.qualityLevel}`);
 
