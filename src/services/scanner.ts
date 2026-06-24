@@ -481,18 +481,23 @@ export const ScannerService = {
                         // 一般過濾：位階 > 80% 直接排除
                         if (positionRatio > 0.80) return null;
 
+                        // ── 建立突破前（不含今日）的歷史陣列 ──────────────
+                        const priorVolumes = volumes.slice(0, -1);
+                        const priorPrices = prices.slice(0, -1);
+
                         // ── 策略六：成交量型態質化 ───────────────────────
-                        const vol20Avg = volumes.slice(-20).reduce((a: number, b: number) => a + b, 0) / 20;
-                        const vol45Avg = volumes.slice(-45).reduce((a: number, b: number) => a + b, 0) / Math.min(volumes.length, 45);
+                        // 均量計算均不包含「今日（突破日）」，才能真實反映突破前的收縮狀態
+                        const priorVol20Avg = priorVolumes.length >= 20 ? priorVolumes.slice(-20).reduce((a: number, b: number) => a + b, 0) / 20 : 0;
+                        const priorVol45Avg = priorVolumes.length > 0 ? priorVolumes.slice(-45).reduce((a: number, b: number) => a + b, 0) / Math.min(priorVolumes.length, 45) : 0;
 
-                        // 條件 1：今日量 > 45 日均量 × volThreshold
+                        // 條件 1：今日量 > 突破前 45 日均量 × volThreshold
                         const todayVol = today.Trading_Volume;
-                        if (vol45Avg <= 0 || todayVol < vol45Avg * volThreshold) return null;
+                        if (priorVol45Avg <= 0 || todayVol < priorVol45Avg * volThreshold) return null;
 
-                        // 條件 2：前 2-3 日為縮量（前日量 < 20日均量 × 0.8）
-                        const prevVol1 = volumes[volumes.length - 2] || 0;
-                        const prevVol2 = volumes[volumes.length - 3] || 0;
-                        const hasPriorShrink = prevVol1 < vol20Avg * 0.8 || prevVol2 < vol20Avg * 0.8;
+                        // 條件 2：前 2-3 日為縮量（前日量 < 突破前 20 日均量 × 0.8）
+                        const prevVol1 = priorVolumes[priorVolumes.length - 1] || 0; // 昨天
+                        const prevVol2 = priorVolumes[priorVolumes.length - 2] || 0; // 前天
+                        const hasPriorShrink = prevVol1 < priorVol20Avg * 0.8 || prevVol2 < priorVol20Avg * 0.8;
                         if (!hasPriorShrink) return null;
 
                         // 條件 3：突破日陽線，上影線 < 實體 50%
@@ -507,16 +512,17 @@ export const ScannerService = {
                         const getAtr = (slice: any[]) =>
                             slice.reduce((sum, p) => sum + (p.max > 0 && p.close > 0 ? (p.max - p.min) / p.close : 0), 0) / slice.length;
 
-                        const recent5Atr = prices.length >= 5 ? getAtr(prices.slice(-5)) : 999;
-                        const recent20Atr = prices.length >= 20 ? getAtr(prices.slice(-20)) : 999;
-                        const vol5Avg = volumes.slice(-5).reduce((a: number, b: number) => a + b, 0) / 5;
+                        // 同樣使用排除今日的 priorPrices 計算突破前的收縮情形
+                        const recent5Atr = priorPrices.length >= 5 ? getAtr(priorPrices.slice(-5)) : 999;
+                        const recent20Atr = priorPrices.length >= 20 ? getAtr(priorPrices.slice(-20)) : 999;
+                        const priorVol5Avg = priorVolumes.length >= 5 ? priorVolumes.slice(-5).reduce((a: number, b: number) => a + b, 0) / 5 : 0;
 
-                        // VCP 條件 1：近 5 日 ATR < 近 20 日 ATR × 60%
+                        // VCP 條件 1：突破前 5 日 ATR < 突破前 20 日 ATR × 60%
                         if (recent5Atr >= recent20Atr * 0.60) return null;
-                        // VCP 條件 2：近 5 日均量 < 近 20 日均量 × 70%
-                        if (vol5Avg >= vol20Avg * 0.70) return null;
-                        // VCP 條件 3：突破日爆量 > 20 日均量 × 2.5（已由策略六隱含，再明確驗證）
-                        if (todayVol < vol20Avg * 2.5) return null;
+                        // VCP 條件 2：突破前 5 日均量 < 突破前 20 日均量 × 70%
+                        if (priorVol5Avg >= priorVol20Avg * 0.70) return null;
+                        // VCP 條件 3：突破日爆量 > 突破前 20 日均量 × 2.5
+                        if (todayVol < priorVol20Avg * 2.5) return null;
 
                         // ── 策略四：RS 相對強度硬性排除 ──────────────────
                         let stockReturn10 = 0;
@@ -533,7 +539,7 @@ export const ScannerService = {
                         if (stockReturn10 > indexReturn10 + 0.03) rsBonus = 5;
 
                         // ── 計算綜合評分 ──────────────────────────────────
-                        const vRatio = vol45Avg > 0 ? todayVol / vol45Avg : 0;
+                        const vRatio = priorVol45Avg > 0 ? todayVol / priorVol45Avg : 0;
 
                         // 位階加分：低位優先
                         const positionBonus = positionRatio < 0.40 ? 10 : positionRatio < 0.60 ? 5 : 0;
