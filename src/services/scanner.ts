@@ -274,6 +274,376 @@ export const ScannerService = {
      * Stage 3: Individual Analysis (個股完整分析)
      * Optimized with Redis Raw Data Caching
      */
+    /**
+     * 短線過濾掃描（六大改進策略）
+     * 完全獨立，不影響任何現有掃描邏輯。
+     *
+     * 策略一：大盤位階濾網（動態門檻）
+     * 策略二：掃出數量品質控制
+     * 策略三：VCP 波動率收縮（必要條件）
+     * 策略四：RS 相對強度硬性排除
+     * 策略五：60 日股價位階硬性過濾
+     * 策略六：成交量型態質化
+     */
+    scanShortTerm: async (
+        market: 'TWSE' | 'TPEX' = 'TWSE',
+        sector?: string
+    ): Promise<{
+        results: AnalysisResult[];
+        meta: {
+            marketLevel: number;
+            marketMode: 'normal' | 'strict' | 'extreme';
+            qualityLevel: 'gold' | 'normal' | 'warning' | 'danger';
+            qualityLabel: string;
+            totalFiltered: number;
+            fallbackMode: boolean;
+            indexFailedWarning?: string;
+        };
+        timing: any;
+    }> => {
+        const t0 = Date.now();
+        console.log(`[ShortTermScan] 開始短線過濾掃描 (${market})...`);
+
+        // ── 策略一：取得大盤位階 ────────────────────────────────
+        let marketLevel = 0.5; // 預設中性（fallback 到嚴格模式）
+        let fallbackMode = false;
+        let indexFailedWarning: string | undefined;
+        let taiexHistory: any[] = [];
+
+        try {
+            const todayStr = format(new Date(), 'yyyy-MM-dd');
+            const redis = (await import('@/lib/redis')).redis;
+
+            // 嘗試從 Redis 快取取得大盤資料（TTL 4 小時）
+            const indexCacheKey = `tsbs:raw:index:TAIEX60:${todayStr}`;
+            try {
+                const cached = await redis.get(indexCacheKey);
+                if (cached) taiexHistory = JSON.parse(cached);
+            } catch (_) {}
+
+            if (taiexHistory.length < 10) {
+                const startDate = format(subDays(new Date(), 90), 'yyyy-MM-dd');
+                taiexHistory = await FinMindClient.getDailyStats({
+                    stockId: 'TAIEX',
+                    startDate,
+                    endDate: todayStr
+                });
+                if (taiexHistory.length > 0) {
+                    try { await redis.set(indexCacheKey, JSON.stringify(taiexHistory), 'EX', 14400); } catch (_) {}
+                }
+            }
+
+            if (taiexHistory.length >= 60) {
+                const recent60 = taiexHistory.slice(-60);
+                const closes60 = recent60.map((d: any) => d.close || d.Close || 0).filter((v: number) => v > 0);
+                if (closes60.length >= 10) {
+                    const min60 = Math.min(...closes60);
+                    const max60 = Math.max(...closes60);
+                    const currentClose = closes60[closes60.length - 1];
+                    marketLevel = max60 > min60 ? (currentClose - min60) / (max60 - min60) : 0.5;
+                }
+            } else if (taiexHistory.length >= 10) {
+                // 資料不足 60 日時用現有資料估算
+                const closes = taiexHistory.slice(-Math.min(taiexHistory.length, 60)).map((d: any) => d.close || d.Close || 0).filter((v: number) => v > 0);
+                const min = Math.min(...closes);
+                const max = Math.max(...closes);
+                const current = closes[closes.length - 1];
+                marketLevel = max > min ? (current - min) / (max - min) : 0.5;
+            }
+        } catch (e: any) {
+            fallbackMode = true;
+            indexFailedWarning = '無法取得大盤資料，已切換至嚴格模式';
+            marketLevel = 0.65; // fallback 到嚴格模式邊界
+            console.warn('[ShortTermScan] 大盤資料獲取失敗，使用 fallback 嚴格模式:', e.message);
+        }
+
+        // 根據大盤位階決定動態門檻
+        let marketMode: 'normal' | 'strict' | 'extreme';
+        let volThreshold: number;   // 量能門檻倍數
+        let breakoutThreshold: number; // 突破幅度門檻
+
+        if (marketLevel < 0.60) {
+            marketMode = 'normal';
+            volThreshold = 2.5;
+            breakoutThreshold = 0.035;
+        } else if (marketLevel <= 0.80) {
+            marketMode = 'strict';
+            volThreshold = 3.5;
+            breakoutThreshold = 0.05;
+        } else {
+            marketMode = 'extreme';
+            volThreshold = 5.0;
+            breakoutThreshold = 0.05;
+        }
+
+        console.log(`[ShortTermScan] 大盤位階: ${(marketLevel * 100).toFixed(1)}% → 模式: ${marketMode} (V門檻: ${volThreshold}x, 突破: ${(breakoutThreshold * 100).toFixed(1)}%)`);
+
+        // ── 取得大盤 10 日漲幅（供策略四 RS 計算）──────────────
+        let indexReturn10 = 0;
+        if (taiexHistory.length >= 10) {
+            const idx10 = taiexHistory.slice(-10);
+            const idxCloses = idx10.map((d: any) => d.close || d.Close || 0).filter((v: number) => v > 0);
+            if (idxCloses.length >= 2) {
+                indexReturn10 = (idxCloses[idxCloses.length - 1] - idxCloses[0]) / idxCloses[0];
+            }
+        }
+
+        // ── 取得市場快照 ────────────────────────────────────────
+        const snapshot = await ExchangeClient.getAllMarketQuotes(market);
+        const t1 = Date.now();
+
+        if (snapshot.length === 0) {
+            throw new Error('市場資料取得失敗');
+        }
+
+        // 預篩：紅 K + 成交量 > 1000，按成交量排序取前 200
+        const preFiltered = snapshot
+            .filter(s => s.Trading_Volume > 1000 && s.close > s.open)
+            .sort((a, b) => b.Trading_Volume - a.Trading_Volume)
+            .slice(0, 200);
+
+        console.log(`[ShortTermScan] 預篩完成：${preFiltered.length} 支候選`);
+
+        // Load industry mapping
+        const industryMapping = await ExchangeClient.getIndustryMapping();
+
+        // ── 深度篩選（逐股應用六大策略）────────────────────────
+        const passed: AnalysisResult[] = [];
+        let processedCount = 0;
+
+        const batchSize = 20;
+        for (let i = 0; i < preFiltered.length; i += batchSize) {
+            const batch = preFiltered.slice(i, i + batchSize);
+
+            const batchResults = await Promise.allSettled(
+                batch.map(async (stock) => {
+                    try {
+                        // 獲取 60 日歷史（使用 Redis 快取，與其他掃描共享）
+                        const todayStr = format(new Date(), 'yyyy-MM-dd');
+                        const redis = (await import('@/lib/redis')).redis;
+
+                        let prices: any[] = [];
+                        const priceCacheKey = `tsbs:raw:hist:${stock.stock_id}:${todayStr}`;
+                        try {
+                            const cached = await redis.get(priceCacheKey);
+                            if (cached) prices = JSON.parse(cached);
+                        } catch (_) {}
+
+                        if (prices.length < 25) {
+                            const startDate = format(subDays(new Date(), 90), 'yyyy-MM-dd');
+                            try {
+                                prices = await FinMindClient.getDailyStats({
+                                    stockId: stock.stock_id,
+                                    startDate,
+                                    endDate: todayStr
+                                });
+                            } catch (_) {
+                                prices = await ExchangeClient.getStockHistory(stock.stock_id);
+                            }
+                            if (prices.length > 0) {
+                                try { await redis.set(priceCacheKey, JSON.stringify(prices), 'EX', 14400); } catch (_) {}
+                            }
+                        }
+
+                        if (prices.length < 20) return null;
+
+                        const closes = prices.map((p: any) => p.close);
+                        const volumes = prices.map((p: any) => p.Trading_Volume);
+                        const today = prices[prices.length - 1];
+                        const prevClose = prices[prices.length - 2]?.close || today.close;
+                        const changePercent = prevClose > 0 ? (today.close - prevClose) / prevClose : 0;
+
+                        // ── 策略五：60 日股價位階硬性過濾 ──────────────
+                        const lookback = Math.min(prices.length, 60);
+                        const recent60Closes = closes.slice(-lookback);
+                        const min60 = Math.min(...recent60Closes);
+                        const max60 = Math.max(...recent60Closes);
+                        const positionRatio = max60 > min60 ? (today.close - min60) / (max60 - min60) : 0.5;
+
+                        // 極嚴格模式：只接受 60 日位階 < 40% 的股票
+                        if (marketMode === 'extreme' && positionRatio >= 0.40) return null;
+                        // 一般過濾：位階 > 80% 直接排除
+                        if (positionRatio > 0.80) return null;
+
+                        // ── 策略六：成交量型態質化 ───────────────────────
+                        const vol20Avg = volumes.slice(-20).reduce((a: number, b: number) => a + b, 0) / 20;
+                        const vol45Avg = volumes.slice(-45).reduce((a: number, b: number) => a + b, 0) / Math.min(volumes.length, 45);
+
+                        // 條件 1：今日量 > 45 日均量 × volThreshold
+                        const todayVol = today.Trading_Volume;
+                        if (vol45Avg <= 0 || todayVol < vol45Avg * volThreshold) return null;
+
+                        // 條件 2：前 2-3 日為縮量（前日量 < 20日均量 × 0.8）
+                        const prevVol1 = volumes[volumes.length - 2] || 0;
+                        const prevVol2 = volumes[volumes.length - 3] || 0;
+                        const hasPriorShrink = prevVol1 < vol20Avg * 0.8 || prevVol2 < vol20Avg * 0.8;
+                        if (!hasPriorShrink) return null;
+
+                        // 條件 3：突破日陽線，上影線 < 實體 50%
+                        const openPrice = today.open !== undefined ? today.open : prevClose;
+                        const body = Math.abs(today.close - openPrice);
+                        const upperShadow = today.max - Math.max(today.close, openPrice);
+                        const isBullishCandle = today.close > openPrice;
+                        if (!isBullishCandle) return null;
+                        if (body > 0 && upperShadow > body * 0.5) return null;
+
+                        // ── 策略三：VCP 波動率收縮（四條件全滿足）──────────
+                        const getAtr = (slice: any[]) =>
+                            slice.reduce((sum, p) => sum + (p.max > 0 && p.close > 0 ? (p.max - p.min) / p.close : 0), 0) / slice.length;
+
+                        const recent5Atr = prices.length >= 5 ? getAtr(prices.slice(-5)) : 999;
+                        const recent20Atr = prices.length >= 20 ? getAtr(prices.slice(-20)) : 999;
+                        const vol5Avg = volumes.slice(-5).reduce((a: number, b: number) => a + b, 0) / 5;
+
+                        // VCP 條件 1：近 5 日 ATR < 近 20 日 ATR × 60%
+                        if (recent5Atr >= recent20Atr * 0.60) return null;
+                        // VCP 條件 2：近 5 日均量 < 近 20 日均量 × 70%
+                        if (vol5Avg >= vol20Avg * 0.70) return null;
+                        // VCP 條件 3：突破日爆量 > 20 日均量 × 2.5（已由策略六隱含，再明確驗證）
+                        if (todayVol < vol20Avg * 2.5) return null;
+
+                        // ── 策略四：RS 相對強度硬性排除 ──────────────────
+                        let stockReturn10 = 0;
+                        if (prices.length >= 10) {
+                            const stock10 = closes.slice(-10);
+                            stockReturn10 = stock10[0] > 0 ? (stock10[stock10.length - 1] - stock10[0]) / stock10[0] : 0;
+                        }
+
+                        // 個股 10 日漲幅 < 大盤 10 日漲幅 - 2% → 直接排除
+                        if (indexReturn10 !== 0 && stockReturn10 < indexReturn10 - 0.02) return null;
+
+                        // RS 加分
+                        let rsBonus = 0;
+                        if (stockReturn10 > indexReturn10 + 0.03) rsBonus = 5;
+
+                        // ── 計算綜合評分 ──────────────────────────────────
+                        const vRatio = vol45Avg > 0 ? todayVol / vol45Avg : 0;
+
+                        // 位階加分：低位優先
+                        const positionBonus = positionRatio < 0.40 ? 10 : positionRatio < 0.60 ? 5 : 0;
+
+                        // 突破幅度評分
+                        const breakoutScore = changePercent >= breakoutThreshold ? 30 : changePercent >= breakoutThreshold * 0.7 ? 15 : 0;
+
+                        // 量能評分
+                        const volumeScore = vRatio >= volThreshold * 1.5 ? 40 : vRatio >= volThreshold ? 25 : 0;
+
+                        // VCP 收縮程度評分
+                        const vcpScore = recent20Atr > 0 ? Math.max(0, 10 - (recent5Atr / recent20Atr) * 10) : 0;
+
+                        const totalScore = volumeScore + breakoutScore + positionBonus + vcpScore + rsBonus;
+
+                        // 最低門檻：至少 55 分才輸出
+                        if (totalScore < 55) return null;
+
+                        const ma5 = closes.slice(-5).reduce((a: number, b: number) => a + b, 0) / 5;
+                        const ma20 = closes.length >= 20 ? closes.slice(-20).reduce((a: number, b: number) => a + b, 0) / 20 : ma5;
+                        const isMaAligned = today.close > ma5 && ma5 > ma20;
+
+                        const tags: string[] = ['SHORT_TERM', 'VCP_SQUEEZE', 'VOLUME_EXPLOSION'];
+                        if (positionRatio < 0.40) tags.push('LOW_POSITION');
+                        if (rsBonus > 0) tags.push('RS_STRONG');
+                        if (hasPriorShrink) tags.push('PRIOR_SHRINK');
+
+                        const result: AnalysisResult = {
+                            stock_id: stock.stock_id,
+                            stock_name: stock.stock_name,
+                            sector_name: industryMapping[stock.stock_id.trim()] || '其他',
+                            close: today.close,
+                            change_percent: changePercent,
+                            score: Math.min(1, totalScore / 100),
+                            v_ratio: parseFloat(vRatio.toFixed(2)),
+                            is_ma_aligned: isMaAligned,
+                            is_ma_breakout: changePercent >= breakoutThreshold,
+                            is_bullish: isMaAligned,
+                            consecutive_buy: 0,
+                            poc: today.close,
+                            verdict: `VCP收縮+爆量突破 | 位階${(positionRatio * 100).toFixed(0)}% | ${marketMode === 'normal' ? '正常市場' : marketMode === 'strict' ? '嚴格市場' : '極嚴格市場'}`,
+                            tags: tags as any,
+                            warnings: [],
+                            dailyVolumeTrend: volumes.slice(-10),
+                            maConstrictValue: ma20 > 0 ? Math.abs(ma5 - ma20) / ma20 : 0,
+                            today_volume: todayVol,
+                            volumeIncreasing: false,
+                            is_recommended: true,
+                            comprehensiveScoreDetails: {
+                                volumeScore: parseFloat(volumeScore.toFixed(2)),
+                                maScore: parseFloat(vcpScore.toFixed(2)),
+                                chipScore: parseFloat(breakoutScore.toFixed(2)),
+                                rsScore: parseFloat((rsBonus + positionBonus).toFixed(2)),
+                                total: parseFloat(totalScore.toFixed(2))
+                            }
+                        };
+
+                        return result;
+                    } catch (e) {
+                        console.warn(`[ShortTermScan] Error processing ${stock.stock_id}:`, e);
+                        return null;
+                    }
+                })
+            );
+
+            batchResults.forEach(r => {
+                processedCount++;
+                if (r.status === 'fulfilled' && r.value) {
+                    passed.push(r.value);
+                }
+            });
+
+            console.log(`[ShortTermScan] 進度 ${processedCount}/${preFiltered.length}，已通過 ${passed.length} 支`);
+        }
+
+        const t2 = Date.now();
+
+        // ── 策略二：數量品質警示與自動控制 ─────────────────────
+        let qualityLevel: 'gold' | 'normal' | 'warning' | 'danger';
+        let qualityLabel: string;
+        const totalFiltered = passed.length;
+
+        let finalResults = [...passed].sort((a, b) =>
+            (b.comprehensiveScoreDetails?.total || 0) - (a.comprehensiveScoreDetails?.total || 0)
+        );
+
+        if (totalFiltered < 20) {
+            qualityLevel = 'gold';
+            qualityLabel = '🥇 黃金時機：掃出數量少，品質精純';
+        } else if (totalFiltered <= 50) {
+            qualityLevel = 'normal';
+            qualityLabel = '✅ 正常品質';
+        } else if (totalFiltered <= 80) {
+            qualityLevel = 'warning';
+            qualityLabel = '⚠️ 市場過熱：取高分前 30 支';
+            finalResults = finalResults.slice(0, 30);
+        } else {
+            qualityLevel = 'danger';
+            qualityLabel = '🚨 嚴重警示：高位假突破風險，僅顯示前 15 支';
+            finalResults = finalResults.slice(0, 15);
+        }
+
+        console.log(`[ShortTermScan] 完成：${finalResults.length} 支通過（原始 ${totalFiltered} 支）`);
+        console.log(`[ShortTermScan] 總耗時: ${t2 - t0}ms`);
+
+        return {
+            results: finalResults,
+            meta: {
+                marketLevel,
+                marketMode,
+                qualityLevel,
+                qualityLabel,
+                totalFiltered,
+                fallbackMode,
+                ...(indexFailedWarning ? { indexFailedWarning } : {})
+            },
+            timing: {
+                snapshot: t1 - t0,
+                deepFilter: t2 - t1,
+                total: t2 - t0,
+                processed: processedCount,
+                preFilteredCount: preFiltered.length
+            }
+        };
+    },
+
     analyzeStock: async (
         stockId: string, 
         settings?: { volumeWeight?: number, maWeight?: number, breakoutWeight?: number, rsWeight?: number }, 

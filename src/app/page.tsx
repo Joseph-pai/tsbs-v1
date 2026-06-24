@@ -95,8 +95,14 @@ export default function DashboardPage() {
   const [enhancedResults, setEnhancedResults] = useState<AnalysisResult[]>([]);
   const [isEnhancedScanning, setIsEnhancedScanning] = useState(false);
   const [enhancedProgress, setEnhancedProgress] = useState({ current: 0, total: 0, phase: '' });
-  const [activeTab, setActiveTab] = useState<'original' | 'enhanced'>('original');
+  const [activeTab, setActiveTab] = useState<'original' | 'enhanced' | 'shortterm'>('original');
   const [backtestScanMode, setBacktestScanMode] = useState<'original' | 'enhanced'>('original');
+
+  // ── 短線過濾掃描 ──
+  const [shortTermResults, setShortTermResults] = useState<AnalysisResult[]>([]);
+  const [isShortTermScanning, setIsShortTermScanning] = useState(false);
+  const [shortTermProgress, setShortTermProgress] = useState({ current: 0, total: 0, phase: '' });
+  const [shortTermMeta, setShortTermMeta] = useState<any>(null);
 
   const handleLogout = async () => {
     try {
@@ -149,7 +155,9 @@ export default function DashboardPage() {
         setHasScanned(parsed.hasScanned || false);
         setTiming(parsed.timing || null);
         setEnhancedResults(parsed.enhancedResults || []);
-        setActiveTab(parsed.activeTab || 'original');
+        // 短線掃描結果不做 session 持久化（掃描時間較長，避免誤導）
+        const savedTab = parsed.activeTab;
+        setActiveTab(savedTab === 'original' || savedTab === 'enhanced' || savedTab === 'shortterm' ? savedTab : 'original');
       } catch (e) {
         console.error('Failed to load session state:', e);
       }
@@ -812,6 +820,37 @@ export default function DashboardPage() {
     }
   };
 
+  // ────────────────────────────────────────────────
+  //  短線過濾掃描（獨立於原始掃描，不影響任何現有邏輯）
+  //  實作六大改進策略（見 6_24短線改進策略.md）
+  // ────────────────────────────────────────────────
+  const runShortTermScan = async () => {
+    setIsShortTermScanning(true);
+    setActiveTab('shortterm');
+    setShortTermResults([]);
+    setShortTermMeta(null);
+    setShortTermProgress({ current: 0, total: 200, phase: '正在取得大盤位階資料...' });
+
+    try {
+      setShortTermProgress({ current: 20, total: 200, phase: '正在預篩選候選股...' });
+
+      const res = await fetch(`/api/scan/short-term?market=${market}&sector=${sector}`);
+      const json = await res.json();
+
+      if (!json.success) throw new Error(json.error || '短線掃描失敗');
+
+      setShortTermProgress({ current: 200, total: 200, phase: `短線掃描完成：找到 ${json.count} 支` });
+      setShortTermResults(json.data || []);
+      setShortTermMeta(json.meta || null);
+
+    } catch (e: any) {
+      console.error('[ShortTermScan]', e);
+      setShortTermProgress({ current: 0, total: 0, phase: `掃描失敗: ${e.message}` });
+    } finally {
+      setIsShortTermScanning(false);
+    }
+  };
+
   const filteredResults = useMemo(() => {
     let baseResults = results.filter(s =>
       s.stock_id.includes(searchTerm) || s.stock_name.includes(searchTerm)
@@ -1124,11 +1163,11 @@ export default function DashboardPage() {
       </div>
 
       {/* Execute Buttons */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
         {/* 原始共振掃描按鈕 */}
         <button
           onClick={() => { setActiveTab('original'); runScan(); }}
-          disabled={isWorking || isEnhancedScanning}
+          disabled={isWorking || isEnhancedScanning || isShortTermScanning}
           className={clsx(
             "flex flex-col items-center justify-center p-8 rounded-[3rem] border-4 transition-all active:scale-[0.98] group shadow-2xl relative overflow-hidden",
             isWorking
@@ -1144,7 +1183,7 @@ export default function DashboardPage() {
         {/* 強化評分掃描按鈕 */}
         <button
           onClick={runEnhancedScan}
-          disabled={isEnhancedScanning || isWorking}
+          disabled={isEnhancedScanning || isWorking || isShortTermScanning}
           className={clsx(
             "flex flex-col items-center justify-center p-8 rounded-[3rem] border-4 transition-all active:scale-[0.98] group shadow-2xl relative overflow-hidden",
             isEnhancedScanning
@@ -1155,6 +1194,22 @@ export default function DashboardPage() {
           {isEnhancedScanning ? <Loader2 className="w-10 h-10 animate-spin mb-2" /> : <Zap className="w-10 h-10 mb-2 group-hover:scale-125 transition-transform" />}
           <span className="text-xl font-black uppercase tracking-widest">強化評分掃描</span>
           <span className="text-sm font-bold text-white/60 mt-1">位階×月營收×成交金額</span>
+        </button>
+
+        {/* 短線過濾掃描按鈕 */}
+        <button
+          onClick={runShortTermScan}
+          disabled={isShortTermScanning || isWorking || isEnhancedScanning}
+          className={clsx(
+            "flex flex-col items-center justify-center p-8 rounded-[3rem] border-4 transition-all active:scale-[0.98] group shadow-2xl relative overflow-hidden",
+            isShortTermScanning
+              ? "bg-slate-900 border-slate-800 cursor-not-allowed"
+              : "bg-gradient-to-r from-orange-700 to-amber-500 border-orange-400 text-white shadow-orange-500/40 hover:scale-[1.02]"
+          )}
+        >
+          {isShortTermScanning ? <Loader2 className="w-10 h-10 animate-spin mb-2" /> : <Filter className="w-10 h-10 mb-2 group-hover:scale-125 transition-transform" />}
+          <span className="text-xl font-black uppercase tracking-widest">短線過濾掃描</span>
+          <span className="text-sm font-bold text-white/60 mt-1">VCP×位階×大盤濾網</span>
         </button>
       </div>
 
@@ -1176,6 +1231,28 @@ export default function DashboardPage() {
               style={{ width: enhancedProgress.total > 0 ? `${(enhancedProgress.current / enhancedProgress.total) * 100}%` : '10%' }}
             />
           </div>
+        </div>
+      )}
+
+      {/* Short-Term Scan Progress */}
+      {isShortTermScanning && (
+        <div className="p-8 bg-orange-900/20 border-2 border-orange-500/30 rounded-[2rem] mb-6 space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-3 h-3 bg-orange-400 rounded-full animate-ping" />
+              <span className="text-lg font-black text-orange-300">{shortTermProgress.phase}</span>
+            </div>
+            <span className="text-base font-mono font-black text-orange-500">
+              {Math.round((shortTermProgress.current / (shortTermProgress.total || 1)) * 100)}%
+            </span>
+          </div>
+          <div className="w-full bg-slate-800 rounded-full h-6 overflow-hidden border border-white/5">
+            <div
+              className="h-full bg-gradient-to-r from-orange-600 to-amber-400 transition-all duration-500"
+              style={{ width: shortTermProgress.total > 0 ? `${(shortTermProgress.current / shortTermProgress.total) * 100}%` : '15%' }}
+            />
+          </div>
+          <p className="text-orange-400/70 text-sm font-bold text-center">⏳ 正在深度分析候選股（VCP + 位階 + 大盤濾網），約需 1-3 分鐘...</p>
         </div>
       )}
 
@@ -1221,7 +1298,7 @@ export default function DashboardPage() {
         )}
 
         {/* Tab 切換（只有至少一組結果時顯示） */}
-        {(hasScanned || enhancedResults.length > 0) && !isWorking && !isEnhancedScanning && (
+        {(hasScanned || enhancedResults.length > 0 || shortTermResults.length > 0) && !isWorking && !isEnhancedScanning && !isShortTermScanning && (
           <div className="flex gap-3">
             <button
               onClick={() => setActiveTab('original')}
@@ -1244,6 +1321,17 @@ export default function DashboardPage() {
               )}
             >
               ⚡ 強化評分掃描 {enhancedResults.length > 0 && `(${enhancedResults.length}支)`}
+            </button>
+            <button
+              onClick={() => setActiveTab('shortterm')}
+              className={clsx(
+                "flex-1 py-3 px-4 rounded-2xl font-black text-base transition-all border-2",
+                activeTab === 'shortterm'
+                  ? "bg-orange-500/20 border-orange-500/60 text-orange-400"
+                  : "bg-slate-900 border-slate-800 text-slate-500 hover:border-slate-600"
+              )}
+            >
+              📡 短線過濾掃描 {shortTermResults.length > 0 && `(${shortTermResults.length}支)`}
             </button>
           </div>
         )}
@@ -1366,6 +1454,99 @@ export default function DashboardPage() {
                 <div id="enhanced-results-container" className="grid grid-cols-1 gap-10 bg-slate-950 p-[2px] rounded-[3rem]">
                   {filteredEnhancedResults.map((stock, index) => (
                     <div key={stock.stock_id} onClick={() => router.push(`/stock/${stock.stock_id}`)}>
+                      <StockCard data={stock} index={index + 1} />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </>
+        )}
+
+        {/* 短線過濾掃描結果 */}
+        {activeTab === 'shortterm' && (
+          <>
+            {shortTermResults.length === 0 && !isShortTermScanning ? (
+              <div className="py-40 text-center border-4 border-dashed border-orange-900/30 rounded-[4rem] bg-orange-500/5 px-10">
+                <div className="text-8xl mb-8">📡</div>
+                <p className="text-orange-400 font-black text-4xl mb-4">尚未執行短線過濾掃描</p>
+                <p className="text-slate-500 text-xl font-black mb-6">請按「短線過濾掃描」按鈕</p>
+                <div className="max-w-lg mx-auto p-6 bg-orange-500/10 rounded-[2rem] border border-orange-500/20 text-left space-y-3">
+                  <p className="text-orange-300 font-black text-base">📊 六大改進策略（2026/06/24）</p>
+                  <ul className="text-slate-400 text-sm space-y-2 font-medium">
+                    <li>① 大盤位階濾網 → 動態調整量能/突破門檻</li>
+                    <li>② 掃出數量品質警示 → 自動控制輸出品質</li>
+                    <li>③ VCP 波動率收縮（必要條件）→ 四條件全滿足</li>
+                    <li>④ RS 相對強度硬性排除 → 落後大盤直接排除</li>
+                    <li>⑤ 60 日股價位階過濾 → &gt;80% 直接排除</li>
+                    <li>⑥ 成交量型態質化 → 必須有前期縮量</li>
+                  </ul>
+                </div>
+              </div>
+            ) : shortTermResults.length > 0 ? (
+              <div className="relative animate-in fade-in slide-in-from-bottom-8 duration-700">
+
+                {/* 市場溫度指示器 */}
+                {shortTermMeta && (
+                  <div className={clsx(
+                    "mb-6 p-5 rounded-[2rem] border-2 flex flex-col sm:flex-row items-start sm:items-center gap-4",
+                    shortTermMeta.qualityLevel === 'gold'
+                      ? "bg-yellow-500/10 border-yellow-500/40"
+                      : shortTermMeta.qualityLevel === 'normal'
+                      ? "bg-emerald-500/10 border-emerald-500/40"
+                      : shortTermMeta.qualityLevel === 'warning'
+                      ? "bg-orange-500/10 border-orange-500/40"
+                      : "bg-red-500/10 border-red-500/40"
+                  )}>
+                    <div className="flex-1">
+                      <p className={clsx(
+                        "font-black text-lg",
+                        shortTermMeta.qualityLevel === 'gold' ? "text-yellow-300"
+                        : shortTermMeta.qualityLevel === 'normal' ? "text-emerald-300"
+                        : shortTermMeta.qualityLevel === 'warning' ? "text-orange-300"
+                        : "text-red-300"
+                      )}>
+                        {shortTermMeta.qualityLabel}
+                      </p>
+                      <p className="text-slate-400 text-sm font-medium mt-1">
+                        大盤位階：<span className="text-white font-black">{(shortTermMeta.marketLevel * 100).toFixed(1)}%</span>
+                        　模式：<span className={clsx(
+                          "font-black",
+                          shortTermMeta.marketMode === 'normal' ? "text-emerald-400"
+                          : shortTermMeta.marketMode === 'strict' ? "text-orange-400"
+                          : "text-red-400"
+                        )}>
+                          {shortTermMeta.marketMode === 'normal' ? '正常模式' : shortTermMeta.marketMode === 'strict' ? '嚴格模式' : '極嚴格模式'}
+                        </span>
+                        　原始通過：<span className="text-white font-black">{shortTermMeta.totalFiltered} 支</span>
+                      </p>
+                      {shortTermMeta.fallbackMode && shortTermMeta.indexFailedWarning && (
+                        <p className="text-orange-400 text-sm font-bold mt-1">⚠️ {shortTermMeta.indexFailedWarning}</p>
+                      )}
+                    </div>
+                    <div className="flex-shrink-0">
+                      <div className="w-20 h-20 relative flex items-center justify-center">
+                        <svg className="w-20 h-20 -rotate-90" viewBox="0 0 36 36">
+                          <circle cx="18" cy="18" r="15.9" fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth="3" />
+                          <circle
+                            cx="18" cy="18" r="15.9" fill="none"
+                            stroke={shortTermMeta.marketLevel < 0.60 ? "#10b981" : shortTermMeta.marketLevel <= 0.80 ? "#f59e0b" : "#ef4444"}
+                            strokeWidth="3"
+                            strokeDasharray={`${shortTermMeta.marketLevel * 100} 100`}
+                            strokeLinecap="round"
+                          />
+                        </svg>
+                        <span className="absolute text-xs font-black text-white">
+                          {(shortTermMeta.marketLevel * 100).toFixed(0)}%
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 gap-10 bg-slate-950 p-[2px] rounded-[3rem]">
+                  {shortTermResults.map((stock, index) => (
+                    <div key={stock.stock_id} onClick={() => router.push(`/stock/${stock.stock_id}`)} className="cursor-pointer">
                       <StockCard data={stock} index={index + 1} />
                     </div>
                   ))}
