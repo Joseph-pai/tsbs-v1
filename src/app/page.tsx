@@ -1536,9 +1536,9 @@ export default function DashboardPage() {
                   <ul className="text-slate-400 text-sm space-y-2 font-medium">
                     <li>① 大盤位階濾網 → 動態調整量能/突破門檻</li>
                     <li>② 掃出數量品質警示 → 自動控制輸出品質</li>
-                    <li>③ VCP 波動率收縮（必要條件）→ 四條件全滿足</li>
-                    <li>④ RS 相對強度硬性排除 → 落後大盤直接排除</li>
-                    <li>⑤ 60 日股價位階過濾 → &gt;80% 直接排除</li>
+                    <li>③ VCP 波動率收縮（必要條件）→ ATR 收縮 + 窒息量 + 爆量突破</li>
+                    <li>④ RS 相對強度（20日）→ 落後大盤直接排除</li>
+                    <li>⑤ 距 60 日高點距離過濾 → 市場匹配矩陣，末段追高排除</li>
                     <li>⑥ 成交量型態質化 → 必須有前期縮量</li>
                   </ul>
                 </div>

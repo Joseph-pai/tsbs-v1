@@ -394,13 +394,13 @@ export const ScannerService = {
 
         console.log(`[ShortTermScan] 大盤位階: ${(marketLevel * 100).toFixed(1)}% → 模式: ${marketMode} (V門檻: ${volThreshold}x, 突破: ${(breakoutThreshold * 100).toFixed(1)}%)`);
 
-        // ── 取得大盤 10 日漲幅（供策略四 RS 計算）──────────────
-        let indexReturn10 = 0;
-        if (taiexHistory.length >= 10) {
-            const idx10 = taiexHistory.slice(-10);
-            const idxCloses = idx10.map((d: any) => d.close || d.Close || 0).filter((v: number) => v > 0);
+        // ── 取得大盤 20 日漲幅（供策略四 RS 計算，由 10 日改為 20 日減少短線雜訊）──
+        let indexReturn20 = 0;
+        if (taiexHistory.length >= 20) {
+            const idx20 = taiexHistory.slice(-20);
+            const idxCloses = idx20.map((d: any) => d.close || d.Close || 0).filter((v: number) => v > 0);
             if (idxCloses.length >= 2) {
-                indexReturn10 = (idxCloses[idxCloses.length - 1] - idxCloses[0]) / idxCloses[0];
+                indexReturn20 = (idxCloses[idxCloses.length - 1] - idxCloses[0]) / idxCloses[0];
             }
         }
 
@@ -469,17 +469,47 @@ export const ScannerService = {
                         const prevClose = prices[prices.length - 2]?.close || today.close;
                         const changePercent = prevClose > 0 ? (today.close - prevClose) / prevClose : 0;
 
-                        // ── 策略五：60 日股價位階硬性過濾 ──────────────
+                        // ── 策略五（修正版）：距 60 日高點距離比 + 市場匹配矩陣 ──
+                        // 修正：原硬性排除 >80% 位階會誤殺飆股（AI、重電等主升段股）
+                        // 改為「距高點距離」衡量，強勢突破股不應被排除
                         const lookback = Math.min(prices.length, 60);
                         const recent60Closes = closes.slice(-lookback);
                         const min60 = Math.min(...recent60Closes);
                         const max60 = Math.max(...recent60Closes);
                         const positionRatio = max60 > min60 ? (today.close - min60) / (max60 - min60) : 0.5;
 
-                        // 極嚴格模式：只接受 60 日位階 < 40% 的股票
-                        if (marketMode === 'extreme' && positionRatio >= 0.40) return null;
-                        // 一般過濾：位階 > 80% 直接排除
-                        if (positionRatio > 0.80) return null;
+                        // 距 60 日高點距離比（0 = 就在高點，越大代表離高點越遠）
+                        const distFromHigh = max60 > 0 ? (max60 - today.close) / max60 : 0;
+
+                        // 計算「突破前」連續爆量天數（排除今日，判斷是否已末段）
+                        // priorVolumes 已在下方定義，此處需先計算供位階判斷使用
+                        const vol20ForBoom = volumes.length >= 21
+                            ? volumes.slice(-21, -1).reduce((a: number, b: number) => a + b, 0) / 20
+                            : 0;
+                        let consecutiveBoomDays = 0;
+                        for (let vi = volumes.length - 2; vi >= Math.max(0, volumes.length - 6); vi--) {
+                            if (vol20ForBoom > 0 && volumes[vi] > vol20ForBoom * 2.0) {
+                                consecutiveBoomDays++;
+                            } else {
+                                break;
+                            }
+                        }
+
+                        // 市場 × 位階 匹配矩陣（取代舊的硬性排除）
+                        if (marketMode === 'normal') {
+                            // 正常市場：無位階限制，全部放行
+                        } else if (marketMode === 'strict') {
+                            // 嚴格市場：允許強勢股（距高點 ≤ 20%）或低位股（positionRatio < 0.5）
+                            if (distFromHigh > 0.20 && positionRatio >= 0.50) return null;
+                        } else if (marketMode === 'extreme') {
+                            // 極熱市場：只接受強勢突破（距高點 ≤ 10%），且不能已連爆 3 天（末段）
+                            // 修正：原邏輯要求低位 <40% 是邏輯矛盾（熱市場找破底股）
+                            if (distFromHigh > 0.10) return null;
+                            if (consecutiveBoomDays >= 3) return null;
+                        }
+
+                        // 真正的末段過熱排除：位階 >95% 且已連續爆量 3 天以上
+                        if (positionRatio > 0.95 && consecutiveBoomDays >= 3) return null;
 
                         // ── 建立突破前（不含今日）的歷史陣列 ──────────────
                         const priorVolumes = volumes.slice(0, -1);
@@ -521,22 +551,24 @@ export const ScannerService = {
                         if (recent5Atr >= recent20Atr * 0.60) return null;
                         // VCP 條件 2：突破前 5 日均量 < 突破前 20 日均量 × 70%
                         if (priorVol5Avg >= priorVol20Avg * 0.70) return null;
-                        // VCP 條件 3：突破日爆量 > 突破前 20 日均量 × 2.5
-                        if (todayVol < priorVol20Avg * 2.5) return null;
+                        // VCP 條件 3（修正版）：移除重複的爆量門檻，已由策略六統一負責
+                        // 原條件：todayVol > priorVol20Avg × 2.5 與策略六的 45日均量 × volThreshold 衝突
+                        // VCP 此處只驗證「收縮型態」，突破爆量驗證由策略六的 priorVol45Avg × volThreshold 負責
 
-                        // ── 策略四：RS 相對強度硬性排除 ──────────────────
-                        let stockReturn10 = 0;
-                        if (prices.length >= 10) {
-                            const stock10 = closes.slice(-10);
-                            stockReturn10 = stock10[0] > 0 ? (stock10[stock10.length - 1] - stock10[0]) / stock10[0] : 0;
+                        // ── 策略四（修正版）：RS 相對強度硬性排除（10 日改為 20 日）────
+                        // 修正：10 日過短，單日波動易誤判；20 日更能反映「大盤修正時個股韌性」
+                        let stockReturn20 = 0;
+                        if (prices.length >= 20) {
+                            const stock20 = closes.slice(-20);
+                            stockReturn20 = stock20[0] > 0 ? (stock20[stock20.length - 1] - stock20[0]) / stock20[0] : 0;
                         }
 
-                        // 個股 10 日漲幅 < 大盤 10 日漲幅 - 2% → 直接排除
-                        if (indexReturn10 !== 0 && stockReturn10 < indexReturn10 - 0.02) return null;
+                        // 個股 20 日漲幅 < 大盤 20 日漲幅 - 2% → 直接排除（相對弱勢）
+                        if (indexReturn20 !== 0 && stockReturn20 < indexReturn20 - 0.02) return null;
 
                         // RS 加分
                         let rsBonus = 0;
-                        if (stockReturn10 > indexReturn10 + 0.03) rsBonus = 5;
+                        if (stockReturn20 > indexReturn20 + 0.03) rsBonus = 5;
 
                         // ── 計算綜合評分 ──────────────────────────────────
                         const vRatio = priorVol45Avg > 0 ? todayVol / priorVol45Avg : 0;
