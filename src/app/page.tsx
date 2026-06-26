@@ -105,7 +105,8 @@ export default function DashboardPage() {
   const [shortTermProgress, setShortTermProgress] = useState({ current: 0, total: 0, phase: '' });
   const [shortTermMeta, setShortTermMeta] = useState<any>(null);
   const [hasShortTermScanned, setHasShortTermScanned] = useState(false);
-  const [shortTermUserMode, setShortTermUserMode] = useState<'auto' | 'loose' | 'medium' | 'strict'>('auto');
+  const [shortTermSelectedDates, setShortTermSelectedDates] = useState<Set<string>>(new Set());
+  const [shortTermCalViewMonth, setShortTermCalViewMonth] = useState(() => new Date());
 
   const handleLogout = async () => {
     try {
@@ -835,12 +836,36 @@ export default function DashboardPage() {
     setActiveTab('shortterm');
     setShortTermResults([]);
     setShortTermMeta(null);
-    setShortTermProgress({ current: 0, total: 200, phase: '正在取得大盤位階資料...' });
+    setShortTermProgress({ current: 0, total: 200, phase: '正在取得大盤與個股資料...' });
 
     try {
       setShortTermProgress({ current: 20, total: 200, phase: '正在預篩選候選股...' });
 
-      const res = await fetch(`/api/scan/short-term?market=${market}&sector=${sector}&mode=${shortTermUserMode}`);
+      let stockIds: string[] = [];
+      if (shortTermSelectedDates.size > 0) {
+        // Collect all stocks from the selected historical dates
+        const ids = new Set<string>();
+        historyRecords.forEach(r => {
+          if (r.scanDate && shortTermSelectedDates.has(r.scanDate)) {
+            r.results?.forEach((s: any) => ids.add(s.stock_id));
+          }
+        });
+        stockIds = Array.from(ids);
+        
+        if (stockIds.length === 0) {
+            throw new Error('選擇的日期中沒有歷史掃描數據');
+        }
+        setShortTermProgress({ current: 30, total: 200, phase: `從歷史紀錄提取 ${stockIds.length} 支股票，開始 v3.1 評分...` });
+      }
+
+      const res = await fetch(`/api/scan/short-term-v31`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            market: market,
+            stockIds: stockIds.length > 0 ? stockIds : undefined
+        })
+      });
       const json = await res.json();
 
       if (!json.success) throw new Error(json.error || '短線掃描失敗');
@@ -1169,51 +1194,62 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* 短線模式選擇 */}
-      <div className="flex flex-wrap items-center justify-end gap-3 mb-4">
-        <span className="text-sm font-bold text-slate-400">短線大盤濾網模式：</span>
-        <div className="flex bg-slate-900 border border-slate-700 rounded-xl overflow-hidden shadow-inner">
-          <button
-            onClick={() => setShortTermUserMode('auto')}
-            className={clsx(
-              "px-4 py-2 text-sm font-black transition-colors",
-              shortTermUserMode === 'auto' ? "bg-orange-500 text-white" : "text-slate-400 hover:text-white"
-            )}
-            title="依據大盤位階自動切換"
-          >
-            自動 (推薦)
-          </button>
-          <button
-            onClick={() => setShortTermUserMode('loose')}
-            className={clsx(
-              "px-4 py-2 text-sm font-black transition-colors border-l border-slate-700",
-              shortTermUserMode === 'loose' ? "bg-emerald-500 text-white" : "text-slate-400 hover:text-white"
-            )}
-            title="無視大盤高低，強制使用最寬鬆門檻"
-          >
-            寬鬆
-          </button>
-          <button
-            onClick={() => setShortTermUserMode('medium')}
-            className={clsx(
-              "px-4 py-2 text-sm font-black transition-colors border-l border-slate-700",
-              shortTermUserMode === 'medium' ? "bg-amber-500 text-white" : "text-slate-400 hover:text-white"
-            )}
-            title="強制使用中等門檻"
-          >
-            中等
-          </button>
-          <button
-            onClick={() => setShortTermUserMode('strict')}
-            className={clsx(
-              "px-4 py-2 text-sm font-black transition-colors border-l border-slate-700",
-              shortTermUserMode === 'strict' ? "bg-red-500 text-white" : "text-slate-400 hover:text-white"
-            )}
-            title="強制使用極嚴格門檻"
-          >
-            嚴格
-          </button>
+      {/* 短線模式與歷史日期選擇 */}
+      <div className="flex flex-col items-end gap-2 mb-4">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-bold text-orange-400 flex items-center gap-1">
+            <Calendar className="w-4 h-4" /> 歷史短線分析 (可多選)
+          </span>
+          {shortTermSelectedDates.size > 0 && (
+            <span className="text-xs bg-orange-500/20 text-orange-400 px-2 py-0.5 rounded-full font-black">
+              已選 {shortTermSelectedDates.size} 天
+            </span>
+          )}
         </div>
+        <div className="flex items-center gap-2">
+          <div className="flex bg-slate-900 border border-slate-700 rounded-xl overflow-hidden shadow-inner flex-wrap max-w-2xl">
+            {Array.from(new Set(historyRecords.map(r => r.scanDate)))
+              .filter((date): date is string => !!date)
+              .sort((a, b) => b.localeCompare(a))
+              .slice(0, 14)
+              .map(date => {
+                const isSelected = shortTermSelectedDates.has(date);
+                return (
+                  <button
+                    key={date}
+                    onClick={() => {
+                      const next = new Set(shortTermSelectedDates);
+                      if (next.has(date)) next.delete(date);
+                      else next.add(date);
+                      setShortTermSelectedDates(next);
+                    }}
+                    className={clsx(
+                      "px-3 py-2 text-xs font-black transition-colors border-r border-slate-800 last:border-0",
+                      isSelected ? "bg-orange-500 text-white" : "text-slate-400 hover:text-white hover:bg-slate-800"
+                    )}
+                  >
+                    {date.substring(5)}
+                  </button>
+                );
+            })}
+            {historyRecords.length === 0 && (
+              <span className="px-3 py-2 text-xs text-slate-600">無歷史掃描紀錄</span>
+            )}
+          </div>
+          {shortTermSelectedDates.size > 0 && (
+            <button
+              onClick={() => setShortTermSelectedDates(new Set())}
+              className="px-3 py-2 text-xs font-bold text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors"
+            >
+              清除
+            </button>
+          )}
+        </div>
+        <p className="text-xs text-slate-500 mt-1 font-bold">
+          {shortTermSelectedDates.size > 0 
+            ? "💡 將提取所選日期的歷史股票重新進行 v3.1 短線評分" 
+            : "💡 未選擇日期，點擊「短線過濾掃描」將直接掃描當日全市場"}
+        </p>
       </div>
 
       {/* Execute Buttons */}

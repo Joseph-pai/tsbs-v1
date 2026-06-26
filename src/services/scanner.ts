@@ -1018,4 +1018,363 @@ export const ScannerService = {
             throw error;
         }
     }
+,
+
+    scanShortTermV31: async (
+        market: 'TWSE' | 'TPEX' = 'TWSE',
+        stockIds?: string[]
+    ): Promise<{
+        results: any[];
+        meta: any;
+        timing: any;
+    }> => {
+        const t0 = Date.now();
+        console.log(`[ShortTermV31] 開始短線過濾掃描 v3.1 (${market})... 模式: ${stockIds ? '歷史' : '即時'}`);
+
+        const { format, subDays } = await import('date-fns');
+        const redis = (await import('@/lib/redis')).redis;
+        const { FinMindClient } = await import('@/lib/finmind');
+
+        // 1. TAIEX Environment Gate
+        let conservativeMode = false;
+        let taiex5MA = 0;
+        let taiex10dRet = 0;
+        let taiex3dRet = 0;
+        try {
+            const todayStr = format(new Date(), 'yyyy-MM-dd');
+            let taiexHistory: any[] = [];
+            const indexCacheKey = `tsbs:v31:taiex:TAIEX:${todayStr}`;
+            const cached = await redis.get(indexCacheKey);
+            if (cached) taiexHistory = JSON.parse(cached);
+            
+            if (taiexHistory.length < 15) {
+                taiexHistory = await ExchangeClient.getTaiexHistory(1);
+                if (taiexHistory.length > 0) {
+                    await redis.set(indexCacheKey, JSON.stringify(taiexHistory), 'EX', 14400);
+                }
+            }
+
+            if (taiexHistory.length >= 5) {
+                const closes = taiexHistory.slice(-5).map(t => t.close);
+                taiex5MA = closes.reduce((a, b) => a + b, 0) / 5;
+                const latestClose = taiexHistory[taiexHistory.length - 1].close;
+                if (latestClose < taiex5MA * 0.98) {
+                    conservativeMode = true;
+                }
+            }
+            if (taiexHistory.length >= 10) {
+                const latest = taiexHistory[taiexHistory.length - 1].close;
+                const prev10 = taiexHistory[taiexHistory.length - 10].close;
+                taiex10dRet = (latest / prev10 - 1) * 100;
+            }
+            if (taiexHistory.length >= 3) {
+                const latest = taiexHistory[taiexHistory.length - 1].close;
+                const prev3 = taiexHistory[taiexHistory.length - 3].close;
+                taiex3dRet = (latest / prev3 - 1) * 100;
+            }
+        } catch (e) {
+            console.warn('[ShortTermV31] TAIEX fetch failed, defaulting to normal mode');
+        }
+
+        const vsrHardFilter = conservativeMode ? 2.0 : 1.5;
+        const rsThreshold = conservativeMode ? 1.5 : 0.0;
+        console.log(`[ShortTermV31] 大盤模式: ${conservativeMode ? '保守' : '正常'} (VSR門檻: ${vsrHardFilter}, RS門檻: ${rsThreshold}%)`);
+
+        // 2. Fetch candidates
+        let candidates: any[] = [];
+        let t1 = Date.now();
+        if (stockIds && stockIds.length > 0) {
+            candidates = stockIds.map(id => ({ stock_id: id }));
+        } else {
+            const snapshot = await ExchangeClient.getAllMarketQuotes(market);
+            // 預篩：當日成交量 >= 800，紅K
+            candidates = snapshot.filter(s => s.Trading_Volume >= 800 && s.close > s.open);
+        }
+        console.log(`[ShortTermV31] 候選股票數量: ${candidates.length}`);
+
+        const industryMapping = await ExchangeClient.getIndustryMapping();
+        const passedD3: any[] = [];
+        let processedCount = 0;
+        const todayStr = format(new Date(), 'yyyy-MM-dd');
+
+        // 3. Batch processing Dim 1, 2, 3 (Free APIs)
+        const batchSize = 20;
+        for (let i = 0; i < candidates.length; i += batchSize) {
+            const batch = candidates.slice(i, i + batchSize);
+            const batchResults = await Promise.allSettled(
+                batch.map(async (stock) => {
+                    try {
+                        let prices: any[] = [];
+                        const priceCacheKey = `tsbs:raw:hist:${stock.stock_id}:${todayStr}:exchange`;
+                        const cached = await redis.get(priceCacheKey);
+                        if (cached) prices = JSON.parse(cached);
+
+                        if (prices.length < 25) {
+                            prices = await ExchangeClient.getStockHistory(stock.stock_id, 3); // get 3 months
+                            if (prices.length > 0) {
+                                await redis.set(priceCacheKey, JSON.stringify(prices), 'EX', 86400); // 24h cache
+                            }
+                        }
+
+                        if (prices.length < 20) return null;
+
+                        const closes = prices.map(p => p.close);
+                        const volumes = prices.map(p => p.Trading_Volume);
+                        const today = prices[prices.length - 1];
+                        const prevClose = prices[prices.length - 2]?.close || today.close;
+                        
+                        const isWarning = false; // Need API for this, skip for now
+                        const isRestricted = false; // Need API for this, skip for now
+                        const todayVol = today.Trading_Volume;
+                        
+                        if (todayVol < 800) return null; // Pre-filter
+                        
+                        const hlRange = today.max - today.min;
+                        if (hlRange < 0.01) return null; // Pre-filter
+                        
+                        const isLimitUp = (today.close / prevClose - 1) * 100 >= 9.95;
+
+                        // Dim 2: VSR
+                        const priorVolumes = volumes.slice(-21, -1);
+                        const vol20Avg = priorVolumes.reduce((a, b) => a + b, 0) / 20;
+                        const vsr = vol20Avg > 0 ? todayVol / vol20Avg : 0;
+                        
+                        if (!isLimitUp && vsr < vsrHardFilter) return null; // Hard filter
+
+                        let vsrScore = 0;
+                        if (isLimitUp) {
+                            vsrScore = 28;
+                        } else if (vsr >= 2.0) {
+                            vsrScore = 35;
+                        } else {
+                            // linear interpolation between 1.5 and 2.0 (25 to 34)
+                            vsrScore = 25 + ((vsr - 1.5) / 0.5) * 9;
+                        }
+
+                        // Dim 1: RS
+                        const stock10dRet = closes.length >= 10 ? (today.close / closes[closes.length - 10] - 1) * 100 : 0;
+                        const stock3dRet = closes.length >= 3 ? (today.close / closes[closes.length - 3] - 1) * 100 : 0;
+                        const rs10d = stock10dRet - taiex10dRet;
+                        const rs3d = stock3dRet - taiex3dRet;
+                        const rsScoreRaw = rs3d * 0.4 + rs10d * 0.6;
+                        const rsAccelerating = rs3d > rs10d;
+
+                        if (rsScoreRaw <= rsThreshold) return null; // RS Filter
+
+                        const ma5 = closes.slice(-5).reduce((a, b) => a + b, 0) / 5;
+                        const ma20 = closes.slice(-20).reduce((a, b) => a + b, 0) / 20;
+                        
+                        let rsScoreFinal = 0;
+                        if (rsAccelerating && today.close > ma5 && ma5 > ma20) {
+                            rsScoreFinal = 25;
+                        } else if (today.close > ma20) {
+                            rsScoreFinal = 20;
+                        } else {
+                            rsScoreFinal = 12;
+                        }
+
+                        // Dim 3: K-line
+                        const kBodyPct = Math.abs(today.close - today.open) / hlRange;
+                        const upperShadow = (today.max - Math.max(today.close, today.open)) / hlRange;
+                        const dailyRet = (today.close / prevClose - 1) * 100;
+                        const maxClose20d = Math.max(...closes.slice(-21, -1));
+                        const isBreakout = today.close >= maxClose20d;
+
+                        let kScore = 0;
+                        if (isLimitUp) {
+                            kScore = 20;
+                        } else if (kBodyPct > 0.5 && upperShadow < 0.2 && dailyRet > 3.5 && isBreakout) {
+                            kScore = 25;
+                        } else if (kBodyPct > 0.5 && upperShadow < 0.2 && dailyRet > 3.5) {
+                            kScore = 18;
+                        } else if (kBodyPct > 0.5 && upperShadow < 0.2) {
+                            kScore = 15;
+                        } else {
+                            kScore = 5;
+                        }
+
+                        // Freshness
+                        let trendDays = 0;
+                        for (let j = 1; j < 6; j++) {
+                            if (closes.length > j && closes[closes.length - j] > closes[closes.length - j - 1]) {
+                                trendDays++;
+                            } else {
+                                break;
+                            }
+                        }
+                        
+                        let freshnessMult = 1.0;
+                        if (trendDays >= 4) freshnessMult = 0.8;
+                        else if (trendDays === 3) freshnessMult = 0.9;
+
+                        const scoreD123 = rsScoreFinal + (vsrScore + kScore) * freshnessMult + (isLimitUp ? 5 : 0);
+                        
+                        // Gate for Dim 4: Only query chips if score >= 45
+                        if (scoreD123 < 45) return null;
+
+                        return {
+                            stock,
+                            rsScoreFinal,
+                            vsrScore,
+                            kScore,
+                            freshnessMult,
+                            isLimitUp,
+                            scoreD123,
+                            trendDays,
+                            vsr,
+                            todayVol,
+                            industry: industryMapping[stock.stock_id.trim()] || '其他',
+                            close: today.close,
+                            changePercent: dailyRet / 100,
+                            isBreakout
+                        };
+                    } catch (e) {
+                        return null;
+                    }
+                })
+            );
+
+            batchResults.forEach(r => {
+                processedCount++;
+                if (r.status === 'fulfilled' && r.value) {
+                    passedD3.push(r.value);
+                }
+            });
+        }
+
+        const t2 = Date.now();
+        console.log(`[ShortTermV31] 前三維度篩選完成: ${passedD3.length} 支通過`);
+
+        // 4. Dim 4: Institutional (Only for passed stocks)
+        const finalResults: any[] = [];
+        
+        // Calculate sector hits for Logic B
+        const sectorHits: Record<string, number> = {};
+        passedD3.forEach(item => {
+            if (item.vsr >= 2.0 && item.kScore >= 18) {
+                sectorHits[item.industry] = (sectorHits[item.industry] || 0) + 1;
+            }
+        });
+
+        for (const item of passedD3) {
+            try {
+                let insts: any[] = [];
+                const instCacheKey = `tsbs:v31:chip:${item.stock.stock_id}:${todayStr}`;
+                const cached = await redis.get(instCacheKey);
+                if (cached) insts = JSON.parse(cached);
+                
+                if (insts.length === 0) {
+                    const startDate = format(subDays(new Date(), 5), 'yyyy-MM-dd');
+                    insts = await FinMindClient.getInstitutional({ stockId: item.stock.stock_id, startDate, endDate: todayStr });
+                    if (insts.length > 0) {
+                        await redis.set(instCacheKey, JSON.stringify(insts), 'EX', 14400);
+                    }
+                }
+
+                // Get today's net buy
+                const todayInsts = insts.filter(i => i.date === todayStr);
+                let foreignNet = 0;
+                let trustNet = 0;
+                todayInsts.forEach(i => {
+                    const net = (i.buy || 0) - (i.sell || 0);
+                    if (i.name === 'Foreign_Investor') foreignNet += net;
+                    if (i.name === 'Investment_Trust') trustNet += net;
+                });
+
+                // volume is in thousands (張). insts volume is in shares (股).
+                const volShares = item.todayVol * 1000;
+                const trustRatio = trustNet / volShares;
+                const foreignRatio = foreignNet / volShares;
+
+                let chipScore = 0;
+                const A1 = trustRatio > 0.03;
+                const A2 = foreignRatio > 0.015;
+                
+                if (A1 && A2) chipScore += 5; // A3
+                else if (A1) chipScore += 10;
+                else if (A2) chipScore += 8;
+
+                // Logic B
+                if (sectorHits[item.industry] >= 2) chipScore += 5;
+
+                chipScore = Math.min(15, chipScore); // Cap at 15
+
+                const finalScore = item.scoreD123 + chipScore;
+                
+                const tags = ['v3.1'];
+                if (item.isLimitUp) tags.push('漲停');
+                if (item.isBreakout) tags.push('突破');
+                if (chipScore > 0) tags.push('籌碼共振');
+
+                finalResults.push({
+                    stock_id: item.stock.stock_id,
+                    stock_name: ExchangeClient.getStockName(item.stock.stock_id) || item.stock.stock_name || '',
+                    sector_name: item.industry,
+                    close: item.close,
+                    change_percent: item.changePercent,
+                    score: Math.min(1, finalScore / 100),
+                    v_ratio: parseFloat(item.vsr.toFixed(2)),
+                    is_ma_aligned: item.rsScoreFinal === 25,
+                    is_ma_breakout: item.isBreakout,
+                    is_bullish: item.rsScoreFinal >= 20,
+                    consecutive_buy: A1 ? 1 : 0,
+                    poc: item.close,
+                    verdict: `v3.1 短線強勢 | ${conservativeMode ? '保守' : '正常'}模式`,
+                    tags: tags,
+                    warnings: [],
+                    dailyVolumeTrend: [],
+                    maConstrictValue: 0,
+                    today_volume: item.todayVol,
+                    volumeIncreasing: item.vsr >= 2.0,
+                    is_recommended: finalScore >= 70,
+                    comprehensiveScoreDetails: {
+                        rsScore: parseFloat(item.rsScoreFinal.toFixed(1)),
+                        vsrScore: parseFloat(item.vsrScore.toFixed(1)),
+                        klineScore: parseFloat(item.kScore.toFixed(1)),
+                        chipScore: parseFloat(chipScore.toFixed(1)),
+                        freshnessMultiplier: item.freshnessMult,
+                        limitUpBonus: item.isLimitUp ? 5 : 0,
+                        total: parseFloat(finalScore.toFixed(1)),
+                        trendDays: item.trendDays,
+                        vsr: parseFloat(item.vsr.toFixed(2)),
+                        isLimitUp: item.isLimitUp,
+                        marketMode: conservativeMode ? 'conservative' : 'normal'
+                    }
+                });
+            } catch (e) {
+                console.warn(`[ShortTermV31] Error Dim4 for ${item.stock.stock_id}:`, e);
+            }
+        }
+
+        const t3 = Date.now();
+        
+        finalResults.sort((a, b) => b.comprehensiveScoreDetails.total - a.comprehensiveScoreDetails.total);
+        const top30 = finalResults.slice(0, 30);
+
+        let qualityLevel = 'normal';
+        if (top30.length < 10) qualityLevel = 'warning';
+        else if (top30[0] && top30[0].comprehensiveScoreDetails.total > 85) qualityLevel = 'gold';
+
+        console.log(`[ShortTermV31] 完成! 取前 ${top30.length} 名。總耗時: ${t3 - t0}ms`);
+
+        return {
+            results: top30,
+            meta: {
+                marketLevel: taiex5MA,
+                marketMode: conservativeMode ? 'strict' : 'normal',
+                qualityLevel,
+                qualityLabel: conservativeMode ? '保守過濾模式' : '正常掃描模式',
+                totalFiltered: finalResults.length,
+                fallbackMode: false
+            },
+            timing: {
+                total: t3 - t0,
+                preFilter: t1 - t0,
+                dim123: t2 - t1,
+                dim4: t3 - t2,
+                processed: processedCount
+            }
+        };
+    }
+
 };
