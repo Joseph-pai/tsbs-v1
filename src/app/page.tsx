@@ -13,6 +13,7 @@ import AuthGuard from '@/components/layout/AuthGuard';
 import HistoryModal from '@/components/HistoryModal';
 import PreOrderAssistantModal from '@/components/PreOrderAssistantModal';
 import MockTradingModal from '@/components/MockTradingModal';
+import ShortTermCalendarModal from '@/components/ShortTermCalendarModal';
 import { useAuth } from '@/lib/firebase/context/AuthContext';
 import { saveScanRecord, saveBacktestRecord, getScanRecords, deleteScanRecord, updateScanRecord } from '@/services/firebaseDb';
 import { auth } from '@/lib/firebase/config';
@@ -106,7 +107,7 @@ export default function DashboardPage() {
   const [shortTermMeta, setShortTermMeta] = useState<any>(null);
   const [hasShortTermScanned, setHasShortTermScanned] = useState(false);
   const [shortTermSelectedDates, setShortTermSelectedDates] = useState<Set<string>>(new Set());
-  const [shortTermCalViewMonth, setShortTermCalViewMonth] = useState(() => new Date());
+  const [isShortTermCalendarOpen, setIsShortTermCalendarOpen] = useState(false);
 
   const handleLogout = async () => {
     try {
@@ -946,6 +947,19 @@ export default function DashboardPage() {
       <HistoryModal isOpen={showHistory} onClose={() => setShowHistory(false)} />
       <PreOrderAssistantModal isOpen={showPreOrderAssistant} onClose={() => setShowPreOrderAssistant(false)} />
       <MockTradingModal isOpen={showMockTrading} onClose={() => setShowMockTrading(false)} snapshot={snapshot} />
+      <ShortTermCalendarModal 
+        isOpen={isShortTermCalendarOpen} 
+        onClose={() => setIsShortTermCalendarOpen(false)}
+        recordDates={new Set(historyRecords.map(r => r.scanDate).filter((d): d is string => !!d))}
+        selectedDates={shortTermSelectedDates}
+        onToggleDate={(date) => {
+          const next = new Set(shortTermSelectedDates);
+          if (next.has(date)) next.delete(date);
+          else next.add(date);
+          setShortTermSelectedDates(next);
+        }}
+        onClearAll={() => setShortTermSelectedDates(new Set())}
+      />
       <div className="container mx-auto px-6 py-12 max-w-3xl">
       {/* Header */}
       <header className="mb-14 text-center">
@@ -1207,35 +1221,18 @@ export default function DashboardPage() {
           )}
         </div>
         <div className="flex items-center gap-2">
-          <div className="flex bg-slate-900 border border-slate-700 rounded-xl overflow-hidden shadow-inner flex-wrap max-w-2xl">
-            {Array.from(new Set(historyRecords.map(r => r.scanDate)))
-              .filter((date): date is string => !!date)
-              .sort((a, b) => b.localeCompare(a))
-              .slice(0, 14)
-              .map(date => {
-                const isSelected = shortTermSelectedDates.has(date);
-                return (
-                  <button
-                    key={date}
-                    onClick={() => {
-                      const next = new Set(shortTermSelectedDates);
-                      if (next.has(date)) next.delete(date);
-                      else next.add(date);
-                      setShortTermSelectedDates(next);
-                    }}
-                    className={clsx(
-                      "px-3 py-2 text-xs font-black transition-colors border-r border-slate-800 last:border-0",
-                      isSelected ? "bg-orange-500 text-white" : "text-slate-400 hover:text-white hover:bg-slate-800"
-                    )}
-                  >
-                    {date.substring(5)}
-                  </button>
-                );
-            })}
-            {historyRecords.length === 0 && (
-              <span className="px-3 py-2 text-xs text-slate-600">無歷史掃描紀錄</span>
+          <button
+            onClick={() => setIsShortTermCalendarOpen(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-slate-900 hover:bg-slate-800 border border-slate-700 hover:border-orange-500/50 rounded-xl transition-all shadow-inner group"
+          >
+            <span className="text-sm font-bold text-slate-300 group-hover:text-white transition-colors">📅 選擇歷史日期</span>
+            {shortTermSelectedDates.size > 0 && (
+              <span className="text-xs bg-orange-500 text-white px-2 py-0.5 rounded-full font-black">
+                已選: {shortTermSelectedDates.size} 天
+              </span>
             )}
-          </div>
+          </button>
+          
           {shortTermSelectedDates.size > 0 && (
             <button
               onClick={() => setShortTermSelectedDates(new Set())}
