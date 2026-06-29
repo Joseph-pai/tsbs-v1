@@ -14,6 +14,8 @@ import HistoryModal from '@/components/HistoryModal';
 import PreOrderAssistantModal from '@/components/PreOrderAssistantModal';
 import MockTradingModal from '@/components/MockTradingModal';
 import ShortTermCalendarModal from '@/components/ShortTermCalendarModal';
+import CycleMethodModal from '@/components/CycleMethodModal';
+import { CycleResult } from '@/services/cycleScanner';
 import { useAuth } from '@/lib/firebase/context/AuthContext';
 import { saveScanRecord, saveBacktestRecord, getScanRecords, deleteScanRecord, updateScanRecord } from '@/services/firebaseDb';
 import { auth } from '@/lib/firebase/config';
@@ -108,6 +110,11 @@ export default function DashboardPage() {
   const [hasShortTermScanned, setHasShortTermScanned] = useState(false);
   const [shortTermSelectedDates, setShortTermSelectedDates] = useState<Set<string>>(new Set());
   const [isShortTermCalendarOpen, setIsShortTermCalendarOpen] = useState(false);
+
+  // ── 短線週期掃描 ──
+  const [isCycleScanning, setIsCycleScanning] = useState(false);
+  const [cycleResults, setCycleResults] = useState<CycleResult[]>([]);
+  const [showCycleModal, setShowCycleModal] = useState(false);
 
   const handleLogout = async () => {
     try {
@@ -884,6 +891,69 @@ export default function DashboardPage() {
     }
   };
 
+  // ────────────────────────────────────────────────
+  //  短線週期掃描
+  // ────────────────────────────────────────────────
+  const runCycleScan = async () => {
+    if (shortTermSelectedDates.size === 0) return;
+    setIsCycleScanning(true);
+    setShowCycleModal(true);
+    setCycleResults([]);
+    
+    try {
+      const entries: { stockId: string; stockName: string; entryDate: string }[] = [];
+      
+      historyRecords.forEach(r => {
+        if (r.scanDate && shortTermSelectedDates.has(r.scanDate)) {
+          r.results?.forEach((s: any) => {
+            entries.push({
+              stockId: s.stock_id,
+              stockName: s.stock_name,
+              entryDate: r.scanDate as string
+            });
+          });
+        }
+      });
+
+      if (entries.length === 0) {
+        throw new Error('選擇的日期中沒有歷史掃描數據');
+      }
+
+      const uniqueEntriesMap = new Map<string, { stockId: string; stockName: string; entryDate: string }>();
+      entries.forEach(e => {
+          if (!uniqueEntriesMap.has(e.stockId)) {
+              uniqueEntriesMap.set(e.stockId, e);
+          } else {
+              const existing = uniqueEntriesMap.get(e.stockId)!;
+              if (e.entryDate < existing.entryDate) {
+                  uniqueEntriesMap.set(e.stockId, e);
+              }
+          }
+      });
+      const uniqueEntries = Array.from(uniqueEntriesMap.values());
+
+      const res = await fetch('/api/scan/cycle-method', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entries: uniqueEntries })
+      });
+
+      const data = await res.json();
+      if (!data.success) {
+        throw new Error(data.error || '掃描失敗');
+      }
+
+      setCycleResults(data.data);
+
+    } catch (e: any) {
+      console.error('[CycleScan]', e);
+      alert(`錯誤: ${e.message}`);
+      setShowCycleModal(false);
+    } finally {
+      setIsCycleScanning(false);
+    }
+  };
+
   const filteredResults = useMemo(() => {
     let baseResults = results.filter(s =>
       s.stock_id.includes(searchTerm) || s.stock_name.includes(searchTerm)
@@ -959,6 +1029,12 @@ export default function DashboardPage() {
           setShortTermSelectedDates(next);
         }}
         onClearAll={() => setShortTermSelectedDates(new Set())}
+      />
+      <CycleMethodModal
+        isOpen={showCycleModal}
+        onClose={() => setShowCycleModal(false)}
+        results={cycleResults}
+        isScanning={isCycleScanning}
       />
       <div className="container mx-auto px-6 py-12 max-w-3xl">
       {/* Header */}
@@ -1297,6 +1373,34 @@ export default function DashboardPage() {
           {isShortTermScanning ? <Loader2 className="w-10 h-10 animate-spin mb-2" /> : <Filter className="w-10 h-10 mb-2 group-hover:scale-125 transition-transform" />}
           <span className="text-xl font-black uppercase tracking-widest">短線過濾掃描</span>
           <span className="text-sm font-bold text-white/60 mt-1">VCP×位階×大盤濾網</span>
+        </button>
+      </div>
+
+      <div className="w-full mb-6">
+        <button
+          onClick={runCycleScan}
+          disabled={isShortTermScanning || isWorking || isEnhancedScanning || isCycleScanning || shortTermSelectedDates.size === 0}
+          className={clsx(
+            "w-full flex items-center justify-center gap-4 p-5 rounded-3xl border-4 transition-all shadow-xl group",
+            shortTermSelectedDates.size === 0
+              ? "bg-slate-900 border-slate-800 text-slate-600 cursor-not-allowed"
+              : isCycleScanning
+                ? "bg-slate-900 border-slate-800 cursor-not-allowed"
+                : "bg-emerald-900/30 hover:bg-emerald-800/40 border-emerald-700/50 hover:border-emerald-500 text-emerald-400 active:scale-[0.99]"
+          )}
+        >
+          {isCycleScanning ? (
+            <Loader2 className="w-8 h-8 animate-spin" />
+          ) : (
+            <Activity className="w-8 h-8 group-hover:scale-110 transition-transform" />
+          )}
+          <div className="text-left">
+            <div className="text-xl font-black tracking-wider flex items-center gap-2">
+              短線週期掃描
+              {shortTermSelectedDates.size === 0 && <span className="text-xs font-medium text-slate-500 px-2 py-0.5 bg-slate-800 rounded-full">需先選擇歷史日期</span>}
+            </div>
+            <div className="text-sm font-bold opacity-70">對歷史候選股執行進出場分析 (最新收盤價基礎)</div>
+          </div>
         </button>
       </div>
 
