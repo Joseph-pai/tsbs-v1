@@ -1281,6 +1281,7 @@ export const ScannerService = {
                             rsAccelerating,
                             ma5,
                             ma20,
+                            maSpread,
                             dailyRet
                         };
                     } catch (e) {
@@ -1398,7 +1399,7 @@ export const ScannerService = {
                     tags,
                     warnings: [],
                     dailyVolumeTrend: [],
-                    maConstrictValue: item.isMaConstricting ? maSpread : 0,
+                    maConstrictValue: item.isMaConstricting ? item.maSpread : 0,
                     today_volume: item.todayVol,
                     volumeIncreasing: item.vsr >= 1.5,
                     is_recommended: finalScore >= 60,
