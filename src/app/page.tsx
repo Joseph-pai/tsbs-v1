@@ -1585,7 +1585,7 @@ export default function DashboardPage() {
                 <p className="text-orange-400 font-black text-5xl mb-6 leading-tight">今日無符合標的</p>
                 <div className="max-w-md mx-auto space-y-6">
                   <p className="text-slate-400 text-xl font-medium leading-relaxed">
-                    大盤位階: <span className="text-white font-black">{shortTermMeta?.marketLevel ? (shortTermMeta.marketLevel * 100).toFixed(1) : '--'}%</span> ({shortTermMeta?.marketMode === 'normal' ? '正常模式' : shortTermMeta?.marketMode === 'strict' ? '嚴格模式' : shortTermMeta?.marketMode === 'extreme' ? '極嚴格模式' : '未知'})<br/><br/>
+                    大盤位階: <span className="text-white font-black">{shortTermMeta?.marketLevel ? (shortTermMeta.marketLevel * 100).toFixed(1) : '--'}%</span> ({shortTermMeta?.marketMode === 'conservative' ? '保守模式' : shortTermMeta?.marketMode === 'normal' ? '正常模式' : shortTermMeta?.marketMode === 'strict' ? '嚴格模式' : shortTermMeta?.marketMode === 'extreme' ? '極嚴格模式' : '未知'})<br/><br/>
                     在嚴格的 VCP 收縮與位階過濾下，目前市場未出現符合短線爆發條件的個股。<br/><br/>
                     <span className="text-orange-500/70 text-base">（註：六大策略為極度嚴格之短線訊號，無標的為正常現象，請耐心等待市場輪動或重新評估大盤風險）</span>
                   </p>
@@ -1621,10 +1621,11 @@ export default function DashboardPage() {
                         　模式：<span className={clsx(
                           "font-black",
                           shortTermMeta.marketMode === 'normal' ? "text-emerald-400"
+                          : shortTermMeta.marketMode === 'conservative' ? "text-orange-400"
                           : shortTermMeta.marketMode === 'strict' ? "text-orange-400"
                           : "text-red-400"
                         )}>
-                          {shortTermMeta.marketMode === 'normal' ? '正常模式' : shortTermMeta.marketMode === 'strict' ? '嚴格模式' : '極嚴格模式'}
+                          {shortTermMeta.marketMode === 'normal' ? '正常掃描模式' : shortTermMeta.marketMode === 'conservative' ? '保守過濾模式' : shortTermMeta.marketMode === 'strict' ? '嚴格模式' : '極嚴格模式'}
                         </span>
                         　原始通過：<span className="text-white font-black">{shortTermMeta.totalFiltered} 支</span>
                       </p>
@@ -1656,6 +1657,12 @@ export default function DashboardPage() {
                   {shortTermResults.map((stock, index) => (
                     <div key={stock.stock_id} onClick={() => router.push(`/stock/${stock.stock_id}`)} className="cursor-pointer">
                       <StockCard data={stock} index={index + 1} />
+                      {stock.whyBullish && (
+                        <div className="mx-4 -mt-4 mb-2 px-5 py-3 bg-orange-500/10 border border-orange-500/20 rounded-b-[2rem] text-sm font-bold text-orange-300 flex items-center gap-2">
+                          <span>💡</span>
+                          <span>{stock.whyBullish}</span>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>

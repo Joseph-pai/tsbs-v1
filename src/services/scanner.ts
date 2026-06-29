@@ -1035,60 +1035,71 @@ export const ScannerService = {
         const redis = (await import('@/lib/redis')).redis;
         const { FinMindClient } = await import('@/lib/finmind');
 
-        // 1. TAIEX Environment Gate
+        // ── 1. TAIEX 環境閘門（修正：使用60日位階 0-1 比率）──
         let conservativeMode = false;
-        let taiex5MA = 0;
+        let marketLevel = 0.5; // 預設中性
         let taiex10dRet = 0;
         let taiex3dRet = 0;
+        let taiexLatestClose = 0;
+
         try {
             const todayStr = format(new Date(), 'yyyy-MM-dd');
             let taiexHistory: any[] = [];
             const indexCacheKey = `tsbs:v31:taiex:TAIEX:${todayStr}`;
             const cached = await redis.get(indexCacheKey);
             if (cached) taiexHistory = JSON.parse(cached);
-            
+
             if (taiexHistory.length < 15) {
-                taiexHistory = await ExchangeClient.getTaiexHistory(1);
+                taiexHistory = await ExchangeClient.getTaiexHistory(3); // 取3個月確保有60日資料
                 if (taiexHistory.length > 0) {
                     await redis.set(indexCacheKey, JSON.stringify(taiexHistory), 'EX', 14400);
                 }
             }
 
             if (taiexHistory.length >= 5) {
-                const closes = taiexHistory.slice(-5).map(t => t.close);
-                taiex5MA = closes.reduce((a, b) => a + b, 0) / 5;
-                const latestClose = taiexHistory[taiexHistory.length - 1].close;
-                if (latestClose < taiex5MA * 0.98) {
-                    conservativeMode = true;
-                }
+                taiexLatestClose = taiexHistory[taiexHistory.length - 1].close;
+
+                // ── 修正：用60日最高/最低計算相對位階（0-1） ──
+                const closes60 = taiexHistory.slice(-60).map((t: any) => t.close);
+                const max60 = Math.max(...closes60);
+                const min60 = Math.min(...closes60);
+                marketLevel = max60 > min60 ? (taiexLatestClose - min60) / (max60 - min60) : 0.5;
+
+                // 保守模式：大盤60日位階 < 30%（處於低位熊市區間）
+                conservativeMode = marketLevel < 0.3;
             }
             if (taiexHistory.length >= 10) {
-                const latest = taiexHistory[taiexHistory.length - 1].close;
                 const prev10 = taiexHistory[taiexHistory.length - 10].close;
-                taiex10dRet = (latest / prev10 - 1) * 100;
+                taiex10dRet = (taiexLatestClose / prev10 - 1) * 100;
             }
             if (taiexHistory.length >= 3) {
-                const latest = taiexHistory[taiexHistory.length - 1].close;
                 const prev3 = taiexHistory[taiexHistory.length - 3].close;
-                taiex3dRet = (latest / prev3 - 1) * 100;
+                taiex3dRet = (taiexLatestClose / prev3 - 1) * 100;
             }
         } catch (e) {
             console.warn('[ShortTermV31] TAIEX fetch failed, defaulting to normal mode');
         }
 
-        const vsrHardFilter = conservativeMode ? 2.0 : 1.5;
-        const rsThreshold = conservativeMode ? 1.5 : 0.0;
-        console.log(`[ShortTermV31] 大盤模式: ${conservativeMode ? '保守' : '正常'} (VSR門檻: ${vsrHardFilter}, RS門檻: ${rsThreshold}%)`);
+        // ── 放寬門檻（目標：找20日潛力股）──
+        const vsrHardFilter = conservativeMode ? 1.5 : 1.2;
+        const rsThreshold = conservativeMode ? 0.5 : -1.0;
+        const dim4EntryGate = 35; // 降低進入Dim4門檻（原本45）
 
-        // 2. Fetch candidates
+        console.log(`[ShortTermV31] 大盤位階: ${(marketLevel * 100).toFixed(1)}% → 模式: ${conservativeMode ? '保守' : '正常'} (VSR門檻: ${vsrHardFilter}, RS門檻: ${rsThreshold}%)`);
+
+        // ── 2. 取得候選股票 ──
         let candidates: any[] = [];
-        let t1 = Date.now();
+        const t1 = Date.now();
         if (stockIds && stockIds.length > 0) {
             candidates = stockIds.map(id => ({ stock_id: id }));
         } else {
             const snapshot = await ExchangeClient.getAllMarketQuotes(market);
-            // 預篩：當日成交量 >= 800，紅K
-            candidates = snapshot.filter(s => s.Trading_Volume >= 800 && s.close > s.open);
+            // 放寬預篩：移除必收紅K限制，降低量能門檻，加最低收盤5元
+            candidates = snapshot.filter(s =>
+                s.Trading_Volume >= 300 &&
+                s.close >= 5 &&
+                s.close > 0
+            );
         }
         console.log(`[ShortTermV31] 候選股票數量: ${candidates.length}`);
 
@@ -1097,7 +1108,7 @@ export const ScannerService = {
         let processedCount = 0;
         const todayStr = format(new Date(), 'yyyy-MM-dd');
 
-        // 3. Batch processing Dim 1, 2, 3 (Free APIs)
+        // ── 3. 批次計算 Dim1、Dim2、Dim3（免費API，不消耗FinMind） ──
         const batchSize = 20;
         for (let i = 0; i < candidates.length; i += batchSize) {
             const batch = candidates.slice(i, i + batchSize);
@@ -1110,48 +1121,48 @@ export const ScannerService = {
                         if (cached) prices = JSON.parse(cached);
 
                         if (prices.length < 25) {
-                            prices = await ExchangeClient.getStockHistory(stock.stock_id, 3); // get 3 months
+                            prices = await ExchangeClient.getStockHistory(stock.stock_id, 3);
                             if (prices.length > 0) {
-                                await redis.set(priceCacheKey, JSON.stringify(prices), 'EX', 86400); // 24h cache
+                                await redis.set(priceCacheKey, JSON.stringify(prices), 'EX', 86400);
                             }
                         }
 
                         if (prices.length < 20) return null;
 
-                        const closes = prices.map(p => p.close);
-                        const volumes = prices.map(p => p.Trading_Volume);
+                        const closes = prices.map((p: any) => p.close);
+                        const volumes = prices.map((p: any) => p.Trading_Volume);
                         const today = prices[prices.length - 1];
                         const prevClose = prices[prices.length - 2]?.close || today.close;
-                        
-                        const isWarning = false; // Need API for this, skip for now
-                        const isRestricted = false; // Need API for this, skip for now
-                        const todayVol = today.Trading_Volume;
-                        
-                        if (todayVol < 800) return null; // Pre-filter
-                        
-                        const hlRange = today.max - today.min;
-                        if (hlRange < 0.01) return null; // Pre-filter
-                        
-                        const isLimitUp = (today.close / prevClose - 1) * 100 >= 9.95;
 
-                        // Dim 2: VSR
+                        const todayVol = today.Trading_Volume;
+                        if (todayVol < 300 || today.close < 5) return null;
+
+                        const hlRange = today.max - today.min;
+                        if (hlRange < 0.01) return null;
+
+                        const isLimitUp = (today.close / prevClose - 1) * 100 >= 9.95;
+                        const dailyRet = (today.close / prevClose - 1) * 100;
+
+                        // ── Dim 2: VSR（量能激增） ──
                         const priorVolumes = volumes.slice(-21, -1);
-                        const vol20Avg = priorVolumes.reduce((a, b) => a + b, 0) / 20;
+                        const vol20Avg = priorVolumes.reduce((a: number, b: number) => a + b, 0) / Math.max(priorVolumes.length, 1);
                         const vsr = vol20Avg > 0 ? todayVol / vol20Avg : 0;
-                        
-                        if (!isLimitUp && vsr < vsrHardFilter) return null; // Hard filter
+
+                        if (!isLimitUp && vsr < vsrHardFilter) return null;
 
                         let vsrScore = 0;
                         if (isLimitUp) {
                             vsrScore = 28;
                         } else if (vsr >= 2.0) {
                             vsrScore = 35;
-                        } else {
-                            // linear interpolation between 1.5 and 2.0 (25 to 34)
+                        } else if (vsr >= 1.5) {
                             vsrScore = 25 + ((vsr - 1.5) / 0.5) * 9;
+                        } else {
+                            // 1.2–1.5 區間線性插值 18–25
+                            vsrScore = 18 + ((vsr - 1.2) / 0.3) * 7;
                         }
 
-                        // Dim 1: RS
+                        // ── Dim 1: RS 相對強度（雙軌制） ──
                         const stock10dRet = closes.length >= 10 ? (today.close / closes[closes.length - 10] - 1) * 100 : 0;
                         const stock3dRet = closes.length >= 3 ? (today.close / closes[closes.length - 3] - 1) * 100 : 0;
                         const rs10d = stock10dRet - taiex10dRet;
@@ -1159,24 +1170,26 @@ export const ScannerService = {
                         const rsScoreRaw = rs3d * 0.4 + rs10d * 0.6;
                         const rsAccelerating = rs3d > rs10d;
 
-                        if (rsScoreRaw <= rsThreshold) return null; // RS Filter
+                        if (rsScoreRaw <= rsThreshold) return null;
 
-                        const ma5 = closes.slice(-5).reduce((a, b) => a + b, 0) / 5;
-                        const ma20 = closes.slice(-20).reduce((a, b) => a + b, 0) / 20;
-                        
+                        const ma5 = closes.slice(-5).reduce((a: number, b: number) => a + b, 0) / 5;
+                        const ma10 = closes.length >= 10 ? closes.slice(-10).reduce((a: number, b: number) => a + b, 0) / 10 : ma5;
+                        const ma20 = closes.slice(-20).reduce((a: number, b: number) => a + b, 0) / 20;
+
                         let rsScoreFinal = 0;
                         if (rsAccelerating && today.close > ma5 && ma5 > ma20) {
                             rsScoreFinal = 25;
                         } else if (today.close > ma20) {
                             rsScoreFinal = 20;
-                        } else {
+                        } else if (rsScoreRaw > 0) {
                             rsScoreFinal = 12;
+                        } else {
+                            rsScoreFinal = 6; // 負RS仍通過（已經過 rsThreshold 篩選），給最低分
                         }
 
-                        // Dim 3: K-line
+                        // ── Dim 3: K線品質 ──
                         const kBodyPct = Math.abs(today.close - today.open) / hlRange;
                         const upperShadow = (today.max - Math.max(today.close, today.open)) / hlRange;
-                        const dailyRet = (today.close / prevClose - 1) * 100;
                         const maxClose20d = Math.max(...closes.slice(-21, -1));
                         const isBreakout = today.close >= maxClose20d;
 
@@ -1189,44 +1202,86 @@ export const ScannerService = {
                             kScore = 18;
                         } else if (kBodyPct > 0.5 && upperShadow < 0.2) {
                             kScore = 15;
+                        } else if (kBodyPct > 0.3) {
+                            kScore = 10; // 小陽線也給分（20日潛力）
                         } else {
                             kScore = 5;
                         }
 
-                        // Freshness
+                        // ── 新鮮度係數 ──
                         let trendDays = 0;
                         for (let j = 1; j < 6; j++) {
-                            if (closes.length > j && closes[closes.length - j] > closes[closes.length - j - 1]) {
+                            if (closes.length > j + 1 && closes[closes.length - j] > closes[closes.length - j - 1]) {
                                 trendDays++;
                             } else {
                                 break;
                             }
                         }
-                        
+
                         let freshnessMult = 1.0;
                         if (trendDays >= 4) freshnessMult = 0.8;
                         else if (trendDays === 3) freshnessMult = 0.9;
 
-                        const scoreD123 = rsScoreFinal + (vsrScore + kScore) * freshnessMult + (isLimitUp ? 5 : 0);
-                        
-                        // Gate for Dim 4: Only query chips if score >= 45
-                        if (scoreD123 < 45) return null;
+                        // ── 20日潛力加分項目 ──
+                        let bonusScore = 0;
+                        const bonusReasons: string[] = [];
+
+                        // 均線蓄力：MA5/MA10/MA20 彼此差距 < 3%（糾結後即將發力）
+                        const maSpread = Math.max(ma5, ma10, ma20) / Math.min(ma5, ma10, ma20) - 1;
+                        const isMaConstricting = maSpread < 0.03;
+                        if (isMaConstricting) {
+                            bonusScore += 5;
+                            bonusReasons.push('均線蓄力糾結');
+                        }
+
+                        // 量縮後爆量：過去10日有≥3天縮量，今日放量
+                        const prior10Vols = volumes.slice(-11, -1);
+                        const shrinkDays = prior10Vols.filter((v: number) => vol20Avg > 0 && v < vol20Avg * 0.8).length;
+                        if (shrinkDays >= 3 && vsr >= 1.2) {
+                            bonusScore += 5;
+                            bonusReasons.push(`量縮${shrinkDays}天後爆量`);
+                        }
+
+                        // 月線以上
+                        if (today.close > ma20) {
+                            bonusScore += 3;
+                            bonusReasons.push('站上月線');
+                        }
+
+                        // 動能加速（3日RS > 10日RS）
+                        if (rsAccelerating && rs3d > 1) {
+                            bonusScore += 3;
+                            bonusReasons.push('短期動能加速');
+                        }
+
+                        const scoreD123 = rsScoreFinal + (vsrScore + kScore) * freshnessMult + (isLimitUp ? 5 : 0) + bonusScore;
+
+                        // Dim4 進入門檻（降低至35分）
+                        if (scoreD123 < dim4EntryGate) return null;
 
                         return {
                             stock,
                             rsScoreFinal,
                             vsrScore,
                             kScore,
+                            bonusScore,
+                            bonusReasons,
                             freshnessMult,
                             isLimitUp,
                             scoreD123,
                             trendDays,
                             vsr,
                             todayVol,
-                            industry: industryMapping[stock.stock_id.trim()] || '其他',
+                            vol20Avg,
+                            industry: (industryMapping[stock.stock_id.trim()] || '其他').replace(/\s*\[.*?\]/, '').trim(),
                             close: today.close,
                             changePercent: dailyRet / 100,
-                            isBreakout
+                            isBreakout,
+                            isMaConstricting,
+                            rsAccelerating,
+                            ma5,
+                            ma20,
+                            dailyRet
                         };
                     } catch (e) {
                         return null;
@@ -1245,13 +1300,13 @@ export const ScannerService = {
         const t2 = Date.now();
         console.log(`[ShortTermV31] 前三維度篩選完成: ${passedD3.length} 支通過`);
 
-        // 4. Dim 4: Institutional (Only for passed stocks)
+        // ── 4. Dim 4: 法人籌碼（只對通過前三維度的股票查詢）──
         const finalResults: any[] = [];
-        
-        // Calculate sector hits for Logic B
+
+        // 計算族群共振（Logic B）
         const sectorHits: Record<string, number> = {};
         passedD3.forEach(item => {
-            if (item.vsr >= 2.0 && item.kScore >= 18) {
+            if (item.vsr >= 1.5 && item.kScore >= 15) {
                 sectorHits[item.industry] = (sectorHits[item.industry] || 0) + 1;
             }
         });
@@ -1262,53 +1317,73 @@ export const ScannerService = {
                 const instCacheKey = `tsbs:v31:chip:${item.stock.stock_id}:${todayStr}`;
                 const cached = await redis.get(instCacheKey);
                 if (cached) insts = JSON.parse(cached);
-                
+
                 if (insts.length === 0) {
-                    const startDate = format(subDays(new Date(), 5), 'yyyy-MM-dd');
+                    const startDate = format(subDays(new Date(), 7), 'yyyy-MM-dd');
                     insts = await FinMindClient.getInstitutional({ stockId: item.stock.stock_id, startDate, endDate: todayStr });
                     if (insts.length > 0) {
                         await redis.set(instCacheKey, JSON.stringify(insts), 'EX', 14400);
                     }
                 }
 
-                // Get today's net buy
-                const todayInsts = insts.filter(i => i.date === todayStr);
+                // 取今日法人淨買賣
+                const todayInsts = insts.filter((i: any) => i.date === todayStr);
                 let foreignNet = 0;
                 let trustNet = 0;
-                todayInsts.forEach(i => {
+                todayInsts.forEach((i: any) => {
                     const net = (i.buy || 0) - (i.sell || 0);
                     if (i.name === 'Foreign_Investor') foreignNet += net;
                     if (i.name === 'Investment_Trust') trustNet += net;
                 });
 
-                // volume is in thousands (張). insts volume is in shares (股).
                 const volShares = item.todayVol * 1000;
-                const trustRatio = trustNet / volShares;
-                const foreignRatio = foreignNet / volShares;
+                const trustRatio = volShares > 0 ? trustNet / volShares : 0;
+                const foreignRatio = volShares > 0 ? foreignNet / volShares : 0;
 
                 let chipScore = 0;
-                const A1 = trustRatio > 0.03;
-                const A2 = foreignRatio > 0.015;
-                
-                if (A1 && A2) chipScore += 5; // A3
-                else if (A1) chipScore += 10;
-                else if (A2) chipScore += 8;
+                const A1 = trustRatio > 0.03;    // 投信主導
+                const A2 = foreignRatio > 0.015; // 外資主導
+                const A3 = A1 && A2;             // 三方共振
 
-                // Logic B
-                if (sectorHits[item.industry] >= 2) chipScore += 5;
+                if (A3) { chipScore += 10; }           // A1+A2 共振 (+10 = A1基礎10 + A3 bonus)
+                else if (A1) { chipScore += 10; }
+                else if (A2) { chipScore += 8; }
+                if (A3) { chipScore = Math.min(15, chipScore + 5); } // A3 再加5，上限15
 
-                chipScore = Math.min(15, chipScore); // Cap at 15
+                // Logic B：族群共振
+                const hasSectorResonance = sectorHits[item.industry] >= 2;
+                if (hasSectorResonance) chipScore += 5;
+                chipScore = Math.min(15, chipScore);
 
                 const finalScore = item.scoreD123 + chipScore;
-                
+
+                // ── 生成潛力理由（whyBullish） ──
+                const whyParts: string[] = [];
+                if (item.isLimitUp) whyParts.push('漲停強訊號');
+                if (item.vsr >= 2.0) whyParts.push(`爆量 ${item.vsr.toFixed(1)}x`);
+                else if (item.vsr >= 1.5) whyParts.push(`放量 ${item.vsr.toFixed(1)}x`);
+                else whyParts.push(`量能 ${item.vsr.toFixed(1)}x`);
+                if (item.isBreakout) whyParts.push('突破20日高點');
+                if (item.rsAccelerating && item.ma5 > item.ma20) whyParts.push('均線多頭排列');
+                whyParts.push(...item.bonusReasons);
+                if (A1) whyParts.push('投信買超');
+                if (A2) whyParts.push('外資買超');
+                if (A3) whyParts.push('法人共振');
+                if (hasSectorResonance) whyParts.push(`${item.industry}族群輪動`);
+                const whyBullish = whyParts.filter(Boolean).join(' · ');
+
                 const tags = ['v3.1'];
                 if (item.isLimitUp) tags.push('漲停');
                 if (item.isBreakout) tags.push('突破');
+                if (item.isMaConstricting) tags.push('均線糾結');
                 if (chipScore > 0) tags.push('籌碼共振');
+                if (hasSectorResonance) tags.push(`${item.industry}輪動`);
+
+                const stockName = ExchangeClient.getStockName(item.stock.stock_id) || item.stock.stock_name || '';
 
                 finalResults.push({
                     stock_id: item.stock.stock_id,
-                    stock_name: ExchangeClient.getStockName(item.stock.stock_id) || item.stock.stock_name || '',
+                    stock_name: stockName,
                     sector_name: item.industry,
                     close: item.close,
                     change_percent: item.changePercent,
@@ -1319,18 +1394,20 @@ export const ScannerService = {
                     is_bullish: item.rsScoreFinal >= 20,
                     consecutive_buy: A1 ? 1 : 0,
                     poc: item.close,
-                    verdict: `v3.1 短線強勢 | ${conservativeMode ? '保守' : '正常'}模式`,
-                    tags: tags,
+                    verdict: whyBullish || `v3.1 短線強勢 | ${conservativeMode ? '保守' : '正常'}模式`,
+                    tags,
                     warnings: [],
                     dailyVolumeTrend: [],
-                    maConstrictValue: 0,
+                    maConstrictValue: item.isMaConstricting ? maSpread : 0,
                     today_volume: item.todayVol,
-                    volumeIncreasing: item.vsr >= 2.0,
-                    is_recommended: finalScore >= 70,
+                    volumeIncreasing: item.vsr >= 1.5,
+                    is_recommended: finalScore >= 60,
+                    whyBullish,
                     comprehensiveScoreDetails: {
                         rsScore: parseFloat(item.rsScoreFinal.toFixed(1)),
                         vsrScore: parseFloat(item.vsrScore.toFixed(1)),
                         klineScore: parseFloat(item.kScore.toFixed(1)),
+                        bonusScore: parseFloat(item.bonusScore.toFixed(1)),
                         chipScore: parseFloat(chipScore.toFixed(1)),
                         freshnessMultiplier: item.freshnessMult,
                         limitUpBonus: item.isLimitUp ? 5 : 0,
@@ -1347,23 +1424,24 @@ export const ScannerService = {
         }
 
         const t3 = Date.now();
-        
+
         finalResults.sort((a, b) => b.comprehensiveScoreDetails.total - a.comprehensiveScoreDetails.total);
         const top30 = finalResults.slice(0, 30);
 
         let qualityLevel = 'normal';
-        if (top30.length < 10) qualityLevel = 'warning';
-        else if (top30[0] && top30[0].comprehensiveScoreDetails.total > 85) qualityLevel = 'gold';
+        if (top30.length < 5) qualityLevel = 'warning';
+        else if (top30[0] && top30[0].comprehensiveScoreDetails.total > 80) qualityLevel = 'gold';
 
         console.log(`[ShortTermV31] 完成! 取前 ${top30.length} 名。總耗時: ${t3 - t0}ms`);
 
         return {
             results: top30,
             meta: {
-                marketLevel: taiex5MA,
-                marketMode: conservativeMode ? 'strict' : 'normal',
+                marketLevel,   // 正確：0-1 比率
+                taiexClose: taiexLatestClose,
+                marketMode: conservativeMode ? 'conservative' : 'normal',
                 qualityLevel,
-                qualityLabel: conservativeMode ? '保守過濾模式' : '正常掃描模式',
+                qualityLabel: conservativeMode ? '保守過濾模式（大盤低位）' : '正常掃描模式',
                 totalFiltered: finalResults.length,
                 fallbackMode: false
             },
