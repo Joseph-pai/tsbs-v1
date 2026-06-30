@@ -1049,13 +1049,13 @@ export default function DashboardPage() {
           爆發信號定位器
         </h1>
 
-        {/* 智能選股導航按鈕 */}
+        {/* 主力AI分析判斷按鈕 */}
         <button
           onClick={() => router.push('/smart-navigator')}
           className="inline-flex items-center gap-2 px-5 py-2 rounded-xl bg-indigo-500/10 border border-indigo-500/30 hover:bg-indigo-500/20 hover:border-indigo-500/60 transition-all text-indigo-400 font-black mb-10 mr-4 group shadow-lg shadow-indigo-500/10"
         >
           <Compass className="w-5 h-5 group-hover:scale-110 transition-transform" />
-          智能選股導航
+          主力AI分析判斷
         </button>
 
         {/* 使用說明按鈕 */}

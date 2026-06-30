@@ -101,6 +101,46 @@ export const FinMindClient = {
         }
     },
 
+    getInstitutionalBuySell: async (options: { stockId?: string; date?: string; startDate?: string; endDate?: string }) => {
+        try {
+            const params: any = {
+                dataset: 'TaiwanStockInstitutionalInvestorsBuySell',
+            };
+            if (options.stockId) params.data_id = options.stockId;
+            if (options.date) {
+                params.start_date = options.date;
+                params.end_date = options.date;
+            }
+            if (options.startDate) params.start_date = options.startDate;
+            if (options.endDate) params.end_date = options.endDate;
+
+            const res = await client.get<FinMindResponse<InstitutionalData>>('', { params });
+
+            if (!res.data || res.data.status !== 200) {
+                const msg = res.data?.msg || 'No response';
+                if (msg.includes('Your level is register')) {
+                    const tierError = new Error('FINMIND_TIER_RESTRICTION');
+                    (tierError as any).tier = 'register';
+                    throw tierError;
+                }
+                throw new Error(`FinMind Status ${res.data?.status || 'Unknown'}: ${msg}`);
+            }
+            return res.data.data || [];
+        } catch (error: any) {
+            if (error.message === 'FINMIND_TIER_RESTRICTION') throw error;
+            if (error.response) {
+                const msg = error.response.data?.msg || JSON.stringify(error.response.data);
+                if (msg.includes('Your level is register')) {
+                    const tierError = new Error('FINMIND_TIER_RESTRICTION');
+                    (tierError as any).tier = 'register';
+                    throw tierError;
+                }
+                throw new Error(`API ${error.response.status}: ${msg}`);
+            }
+            throw error;
+        }
+    },
+
     getStockInfo: async () => {
         try {
             const params = {

@@ -4,6 +4,8 @@ import { getTotalShares } from '@/lib/shares';
 import { calculateSMA, calculateMACD, calculateMACDFull, calculateKD } from '@/services/indicators';
 import { FinMindClient, FinMindExtras } from '@/lib/finmind';
 import { format, subDays } from 'date-fns';
+import { redis } from '@/lib/redis';
+import { StockData, InstitutionalData } from '@/types';
 
 export async function GET(request: Request) {
     try {
@@ -11,24 +13,55 @@ export async function GET(request: Request) {
         const stockId = searchParams.get('stockId');
         const periodStr = searchParams.get('period') || '30';
         const period = parseInt(periodStr, 10);
+        const masterType = searchParams.get('masterType') || 'insider';
 
         if (!stockId) {
             return NextResponse.json({ success: false, error: 'Missing stockId' }, { status: 400 });
         }
 
         const endDate = format(new Date(), 'yyyy-MM-dd');
-        const startDate30 = format(subDays(new Date(), 45), 'yyyy-MM-dd'); // roughly 30 trading days
+        const startDate180 = format(subDays(new Date(), 180), 'yyyy-MM-dd'); // 180 calendar days (~125 trading days) for caching consistency
+        const todayStr = format(new Date(), 'yyyy-MM-dd');
 
-        // Parallelize all external data fetching
-        const [prices, _, totalShares, taiexHistory, marginData, dayTradingData, institutionalData] = await Promise.all([
-            ExchangeClient.getStockHistory(stockId, 6),
+        // Redis cache fetch helper (Standardizing to match scanner.ts keys)
+        const getCachedOrFetch = async (key: string, fetchFn: () => Promise<any>, expiry: number = 14400) => {
+            try {
+                const cached = await redis.get(key);
+                if (cached) {
+                    return JSON.parse(cached);
+                }
+            } catch (e) {
+                console.warn(`[Redis] Read error for key ${key}:`, e);
+            }
+            const data = await fetchFn();
+            if (data && (!Array.isArray(data) || data.length > 0)) {
+                try {
+                    await redis.set(key, JSON.stringify(data), 'EX', expiry);
+                } catch (e) {
+                    console.warn(`[Redis] Write error for key ${key}:`, e);
+                }
+            }
+            return data;
+        };
+
+        // Parallelize all external data fetching with Redis cache wrapper
+        const [pricesRaw, _, totalShares, taiexHistoryRaw, marginDataRaw, dayTradingDataRaw, institutionalDataRaw, institutionalBuySellRaw] = await Promise.all([
+            getCachedOrFetch(`tsbs:raw:hist:${stockId}:${todayStr}`, () => ExchangeClient.getStockHistory(stockId, 6)),
             ExchangeClient.getIndustryMapping().catch(() => ({})),
-            getTotalShares(stockId).catch(() => 0),
-            ExchangeClient.getTaiexHistory(1).catch(() => []),
-            FinMindExtras.getMarginTrading({ stockId, startDate: startDate30, endDate }).catch(() => []),
-            FinMindExtras.getDayTrading({ stockId, startDate: startDate30, endDate }).catch(() => []),
-            FinMindClient.getInstitutional({ stockId, startDate: startDate30, endDate }).catch(() => [])
+            getCachedOrFetch(`tsbs:raw:shares:${stockId}:${todayStr}`, () => getTotalShares(stockId).catch(() => 0), 86400),
+            getCachedOrFetch(`tsbs:raw:taiex:${todayStr}`, () => ExchangeClient.getTaiexHistory(3).catch(() => []), 14400), // 3 months of TAIEX
+            getCachedOrFetch(`tsbs:raw:margin:${stockId}:${todayStr}`, () => FinMindExtras.getMarginTrading({ stockId, startDate: startDate180, endDate }).catch(() => [])),
+            getCachedOrFetch(`tsbs:raw:daytrading:${stockId}:${todayStr}`, () => FinMindExtras.getDayTrading({ stockId, startDate: startDate180, endDate }).catch(() => [])),
+            getCachedOrFetch(`tsbs:raw:inst:${stockId}:${todayStr}`, () => FinMindClient.getInstitutional({ stockId, startDate: startDate180, endDate }).catch(() => [])),
+            getCachedOrFetch(`tsbs:raw:inst_buysell:${stockId}:${todayStr}`, () => FinMindClient.getInstitutionalBuySell({ stockId, startDate: startDate180, endDate }).catch(() => []))
         ]);
+
+        const prices = (pricesRaw || []) as StockData[];
+        const taiexHistory = (taiexHistoryRaw || []) as Array<{ date: string; close: number; spread: number }>;
+        const marginData = (marginDataRaw || []) as any[];
+        const dayTradingData = (dayTradingDataRaw || []) as any[];
+        const institutionalData = (institutionalDataRaw || []) as any[];
+        const institutionalBuySell = (institutionalBuySellRaw || []) as InstitutionalData[];
 
         if (!prices || prices.length === 0) {
             return NextResponse.json({ success: false, error: '無法獲取該股票的歷史交易數據，請確認代號是否正確。' }, { status: 404 });
@@ -135,9 +168,10 @@ export async function GET(request: Request) {
         const upperShadow = latestHigh - Math.max(latestClose, latestOpen);
         const hasLongUpperShadow = body > 0 && upperShadow > body * 2;
 
-        // Calculate 5MA, 20MA, 60MA
+        // Calculate 5MA, 10MA, 20MA, 60MA
         const reversedClose = [...closePrices].reverse();
         const ma5  = calculateSMA(reversedClose, 5);
+        const ma10 = calculateSMA(reversedClose, 10);
         const ma20 = calculateSMA(reversedClose, 20);
         const ma60 = calculateSMA(reversedClose, 60);
 
@@ -619,14 +653,220 @@ export async function GET(request: Request) {
             rules.push(`(因缺少總股本資料，使用5日均量比對換手熱度)`);
         }
 
+        // === 主力 AI 分析判斷與法人籌碼數據分析 ===
+        let itConsecutiveBuyDays = 0;
+        let foreignConsecutiveBuyDays = 0;
+        let itAccumulation = 0;
+        let foreignAccumulation = 0;
+
+        try {
+            if (institutionalBuySell && institutionalBuySell.length > 0) {
+                const byDateAndName: Record<string, Record<string, number>> = {};
+                institutionalBuySell.forEach((row: any) => {
+                    const dt = row.date;
+                    const net = (row.buy || 0) - (row.sell || 0);
+                    if (!byDateAndName[dt]) {
+                        byDateAndName[dt] = {};
+                    }
+                    byDateAndName[dt][row.name] = (byDateAndName[dt][row.name] || 0) + net;
+                });
+
+                const sortedDates = Object.keys(byDateAndName).sort((a, b) => b.localeCompare(a));
+
+                // 投信連買
+                for (let i = 0; i < sortedDates.length; i++) {
+                    const dt = sortedDates[i];
+                    const net = byDateAndName[dt]['Investment_Trust'] || 0;
+                    if (net > 0) {
+                        itConsecutiveBuyDays++;
+                    } else if (net < 0) {
+                        break;
+                    }
+                    if (net === 0 && i > 0) {
+                        break;
+                    }
+                }
+
+                // 外資連買
+                for (let i = 0; i < sortedDates.length; i++) {
+                    const dt = sortedDates[i];
+                    const net = byDateAndName[dt]['Foreign_Investor'] || 0;
+                    if (net > 0) {
+                        foreignConsecutiveBuyDays++;
+                    } else if (net < 0) {
+                        break;
+                    }
+                    if (net === 0 && i > 0) {
+                        break;
+                    }
+                }
+
+                // 30日淨買超
+                const last30Dates = sortedDates.slice(0, 30);
+                last30Dates.forEach(dt => {
+                    itAccumulation += byDateAndName[dt]['Investment_Trust'] || 0;
+                    foreignAccumulation += byDateAndName[dt]['Foreign_Investor'] || 0;
+                });
+            }
+        } catch (e) {
+            console.error('[SmartNavigator Buy/Sell Parse Error]', e);
+        }
+
+        let masterStage: 'accumulation' | 'shakeout' | 'markup' | 'distribution' | 'none' = 'none';
+        let confidence: 'high' | 'medium' | 'low' = 'low';
+        let operationAdvice: 'buy' | 'hold' | 'sell' = 'hold';
+        const stageEvidence: string[] = [];
+        let masterPeriod = '5–15天';
+        let masterLifeline = '5日均線(MA5)';
+
+        if (masterType === 'insider') {
+            masterPeriod = '5–15天';
+            masterLifeline = '5日均線(MA5)';
+
+            const isInsiderMarkup = !!(ma5 && latestClose > ma5 && volumeRatio > 1.5 && isMacdPositive && positionPercent >= 35);
+            const isInsiderDistribution = !!(positionPercent > 60 && (distributionLevel === 'alert' || distributionLevel === 'fatal' || isViolentDistribution || (ma5 && latestClose < ma5 && isHighTurnover)));
+            const isInsiderShakeout = !!((ma5 && latestClose < ma5) && (ma20 && latestClose >= ma20) && (isShrinkingTurnover || isVcpSqueeze || isWyckoffSpring));
+            const isInsiderAccumulation = !!(positionPercent < 35 && (hasBaseBuilding || accumulationScore > 3 || isAccumulationVolume || isModerateVolume));
+
+            if (isInsiderDistribution) {
+                masterStage = 'distribution';
+                operationAdvice = 'sell';
+                if (isViolentDistribution) stageEvidence.push('高位出現暴力出貨，天量爆發');
+                else if (ma5 && latestClose < ma5) stageEvidence.push('股價跌破5日生命線(MA5)');
+                if (distributionLevel === 'alert' || distributionLevel === 'fatal') stageEvidence.push('主力動向預警顯示出貨狀態');
+            } else if (isInsiderMarkup) {
+                masterStage = 'markup';
+                operationAdvice = 'buy';
+                stageEvidence.push('股價穩站5日生命線(MA5)');
+                stageEvidence.push('成交量明顯放大，拉抬動能充沛');
+                if (isMaBullishAligned) stageEvidence.push('均線呈現多頭排列');
+            } else if (isInsiderShakeout) {
+                masterStage = 'shakeout';
+                operationAdvice = 'hold';
+                stageEvidence.push('股價跌破5MA，但守穩月線(MA20)');
+                if (isShrinkingTurnover) stageEvidence.push('洗盤縮量，籌碼惜售');
+                if (isVcpSqueeze) stageEvidence.push('VCP波動收斂，變盤在即');
+            } else if (isInsiderAccumulation) {
+                masterStage = 'accumulation';
+                operationAdvice = 'buy';
+                stageEvidence.push('股價處於低檔整理，主力低調吃貨');
+                if (hasBaseBuilding) stageEvidence.push('低檔築底天數充足');
+                if (accumulationScore > 3) stageEvidence.push(`主力累積吸籌 ${accumulationScore} 天`);
+            } else {
+                masterStage = 'none';
+                operationAdvice = 'hold';
+                stageEvidence.push('目前無明顯業內主力操盤跡象');
+            }
+
+            const insiderMatchCount = [
+                isInsiderMarkup || isInsiderAccumulation || isInsiderShakeout || isInsiderDistribution,
+                volumeRatio > 2,
+                isMacdPositive,
+                accumulationScore > 5
+            ].filter(Boolean).length;
+            confidence = insiderMatchCount >= 3 ? 'high' : insiderMatchCount === 2 ? 'medium' : 'low';
+
+        } else if (masterType === 'institutional') {
+            masterPeriod = '20–40天';
+            masterLifeline = '10日均線(MA10)';
+
+            const isInstMarkup = !!(itConsecutiveBuyDays >= 3 && ma10 && latestClose > ma10 && ma20 && latestClose > ma20);
+            const isInstDistribution = !!((positionPercent > 60 && itAccumulation < 0) || (ma10 && latestClose < ma10 && itConsecutiveBuyDays === 0) || distributionLevel === 'alert');
+            const isInstShakeout = !!((ma10 && latestClose < ma10) && (ma20 && latestClose >= ma20) && isShrinkingTurnover && itAccumulation > 0);
+            const isInstAccumulation = !!(positionPercent < 50 && (itConsecutiveBuyDays > 0 || itAccumulation > 0) && (hasBaseBuilding || isAccumulationVolume));
+
+            if (isInstDistribution) {
+                masterStage = 'distribution';
+                operationAdvice = 'sell';
+                if (itAccumulation < 0) stageEvidence.push('投信近30日累積呈現淨賣超');
+                if (ma10 && latestClose < ma10) stageEvidence.push('股價跌破10日生命線(MA10)');
+                if (itConsecutiveBuyDays === 0) stageEvidence.push('投信買盤中斷或轉為賣超');
+            } else if (isInstMarkup) {
+                masterStage = 'markup';
+                operationAdvice = 'buy';
+                stageEvidence.push(`投信連續買超達 ${itConsecutiveBuyDays} 天`);
+                stageEvidence.push('股價穩站10日生命線(MA10)與月線之上');
+                if (isAccumulationVolume) stageEvidence.push('紅K帶量上漲，買氣暢旺');
+            } else if (isInstShakeout) {
+                masterStage = 'shakeout';
+                operationAdvice = 'hold';
+                stageEvidence.push('股價跌破10MA但月線(MA20)有撐');
+                stageEvidence.push('成交量萎縮，投信並未大舉倒貨');
+            } else if (isInstAccumulation) {
+                masterStage = 'accumulation';
+                operationAdvice = 'buy';
+                stageEvidence.push('投信剛開始買超建倉');
+                if (itAccumulation > 0) stageEvidence.push('投信近30日呈淨累積買超');
+                if (hasBaseBuilding) stageEvidence.push('股價在低檔打底，浮額沈澱');
+            } else {
+                masterStage = 'none';
+                operationAdvice = 'hold';
+                stageEvidence.push('目前無投信認養與建倉跡象');
+            }
+
+            const instMatchCount = [
+                itConsecutiveBuyDays >= 3,
+                itAccumulation > 0,
+                ma10 && latestClose > ma10,
+                isAccumulationVolume
+            ].filter(Boolean).length;
+            confidence = instMatchCount >= 3 ? 'high' : instMatchCount === 2 ? 'medium' : 'low';
+
+        } else if (masterType === 'foreign') {
+            masterPeriod = '60–120天';
+            masterLifeline = '60日均線(MA60/季線)';
+
+            const prevMa60 = calculateSMA(reversedClose.slice(1), 60) || 0;
+            const isForeignMarkup = !!(foreignConsecutiveBuyDays >= 5 && ma60 && latestClose > ma60 && ma60 > prevMa60);
+            const isForeignDistribution = !!((positionPercent > 60 && foreignAccumulation < 0) || (ma60 && latestClose < ma60) || distributionLevel === 'alert');
+            const isForeignShakeout = !!((ma20 && latestClose < ma20) && (ma60 && latestClose >= ma60) && isShrinkingTurnover && foreignAccumulation > 0);
+            const isForeignAccumulation = !!(positionPercent < 50 && (foreignConsecutiveBuyDays > 0 || foreignAccumulation > 0) && (hasBaseBuilding || ma60));
+
+            if (isForeignDistribution) {
+                masterStage = 'distribution';
+                operationAdvice = 'sell';
+                if (ma60 && latestClose < ma60) stageEvidence.push('股價跌破60日生命線(季線)');
+                if (foreignAccumulation < 0) stageEvidence.push('外資近期累積呈現淨倒貨');
+            } else if (isForeignMarkup) {
+                masterStage = 'markup';
+                operationAdvice = 'buy';
+                stageEvidence.push(`外資連續買超達 ${foreignConsecutiveBuyDays} 天`);
+                stageEvidence.push('股價站穩季線(60MA)之上，且季線走平上揚');
+                if (isMacdPositive) stageEvidence.push('長線趨勢與中線動能多頭確認');
+            } else if (isForeignShakeout) {
+                masterStage = 'shakeout';
+                operationAdvice = 'hold';
+                stageEvidence.push('股價回踩季線(60MA)或月線有撐');
+                stageEvidence.push('高位拉回量縮，外資未見撤退');
+            } else if (isForeignAccumulation) {
+                masterStage = 'accumulation';
+                operationAdvice = 'buy';
+                stageEvidence.push('外資大資金於低檔默默建倉');
+                if (hasBaseBuilding) stageEvidence.push('長線底部整理完成');
+                if (foreignConsecutiveBuyDays > 0) stageEvidence.push(`外資開始溫和買進 ${foreignConsecutiveBuyDays} 天`);
+            } else {
+                masterStage = 'none';
+                operationAdvice = 'hold';
+                stageEvidence.push('目前無外資大波段建倉跡象');
+            }
+
+            const foreignMatchCount = [
+                foreignConsecutiveBuyDays >= 5,
+                foreignAccumulation > 0,
+                ma60 && latestClose > ma60,
+                isMacdPositive
+            ].filter(Boolean).length;
+            confidence = foreignMatchCount >= 3 ? 'high' : foreignMatchCount === 2 ? 'medium' : 'low';
+        }
+
         // === 動態操作價格計算 (Dynamic Pricing) ===
         let displayBuyPrice: string | number = '觀望';
         let displayStopLoss: string | number = '--';
         let displayTp1: string | number = '觀望';
         let displayTp2: string | number = '觀望';
 
-        if (light === 'red' || distributionLevel === 'alert' || distributionLevel === 'warning') {
-            // 紅燈或出貨中，封鎖買點，防止散戶高位接刀
+        if (operationAdvice === 'sell' || light === 'red' || distributionLevel === 'alert' || distributionLevel === 'warning') {
+            // 紅燈、出貨中或主力建議賣出時，封鎖買點，防止散戶高位接刀
             displayBuyPrice = '觀望/避開';
             displayStopLoss = Number((ma20 || latestLow).toFixed(2)); // 已持股者維持停損線
             displayTp1 = '伺機停利';
@@ -679,6 +919,7 @@ export async function GET(request: Request) {
                 metrics: {
                     close: latestClose,
                     ma5: ma5 ? Number(ma5.toFixed(2)) : null,
+                    ma10: ma10 ? Number(ma10.toFixed(2)) : null,
                     ma20: ma20 ? Number(ma20.toFixed(2)) : null,
                     ma60: ma60 ? Number(ma60.toFixed(2)) : null,
                     isMaBullishAligned,
@@ -702,6 +943,20 @@ export async function GET(request: Request) {
                     isViolentDistribution,
                 },
                 interpretations: rules,
+                // 新增主力AI分析判斷欄位
+                masterType,
+                masterStage,
+                confidence,
+                operationAdvice,
+                stageEvidence,
+                masterPeriod,
+                masterLifeline,
+                institutionalSignal: {
+                    itConsecutiveBuyDays,
+                    foreignConsecutiveBuyDays,
+                    itAccumulation,
+                    foreignAccumulation
+                }
             }
         });
     } catch (error: any) {

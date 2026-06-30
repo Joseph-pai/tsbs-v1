@@ -196,6 +196,95 @@ function ResultCard({ result, stockId, stockName, overrideLight, overrideLightTe
                 )}
             </div>
 
+            {/* 主力動向分析面板 */}
+            {result.masterStage && (
+                <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl relative overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-500">
+                    <div className="flex items-center justify-between mb-4 border-b border-slate-800 pb-3">
+                        <div className="flex items-center gap-2">
+                            <span className="text-xl">
+                                {result.masterType === 'insider' ? '🎯' : result.masterType === 'institutional' ? '🏛️' : '🌏'}
+                            </span>
+                            <span className="font-black text-slate-200">
+                                {result.masterType === 'insider' ? '業內主力分析' : result.masterType === 'institutional' ? '投信主力分析' : '外資主力分析'}
+                                <span className="text-xs text-slate-500 font-bold ml-1.5">({result.masterPeriod})</span>
+                            </span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                            <span className="text-xs text-slate-400 font-black">置信度：</span>
+                            <span className={`text-xs font-black px-2 py-0.5 rounded-lg ${
+                                result.confidence === 'high' ? 'bg-emerald-500/20 text-emerald-400' :
+                                result.confidence === 'medium' ? 'bg-amber-500/20 text-amber-400' :
+                                'bg-slate-700/20 text-slate-400'
+                            }`}>
+                                {result.confidence === 'high' ? '高' : result.confidence === 'medium' ? '中' : '低'}
+                            </span>
+                        </div>
+                    </div>
+
+                    <div className="mb-4">
+                        <div className="text-xs text-slate-500 font-bold uppercase tracking-widest mb-1.5">▐ 目前主力階段</div>
+                        {(() => {
+                            let badgeBg = 'bg-slate-500/10 border-slate-500/30 text-slate-300';
+                            let stageName = '無主力介入';
+                            let emoji = '⚪';
+
+                            if (result.masterStage === 'accumulation') {
+                                badgeBg = 'bg-indigo-500/15 border-indigo-500/40 text-indigo-300';
+                                stageName = 'Accumulation 吸貨 / 建倉';
+                                emoji = '📥';
+                            } else if (result.masterStage === 'shakeout') {
+                                badgeBg = 'bg-amber-500/15 border-amber-500/40 text-amber-300';
+                                stageName = 'Shakeout 洗盤整理';
+                                emoji = '🌀';
+                            } else if (result.masterStage === 'markup') {
+                                badgeBg = 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300 shadow-[0_0_15px_rgba(16,185,129,0.15)]';
+                                stageName = 'Markup 拉抬 / 主升段';
+                                emoji = '🔥';
+                            } else if (result.masterStage === 'distribution') {
+                                badgeBg = 'bg-rose-500/15 border-rose-500/40 text-rose-300';
+                                stageName = 'Distribution 出貨 / 派發';
+                                emoji = '⚠️';
+                            }
+
+                            return (
+                                <div className={`px-4 py-3 rounded-2xl border font-black text-base md:text-lg flex items-center gap-2 ${badgeBg}`}>
+                                    <span>{emoji}</span>
+                                    <span>{stageName}</span>
+                                </div>
+                            );
+                        })()}
+                    </div>
+
+                    {result.stageEvidence && result.stageEvidence.length > 0 && (
+                        <div className="mb-5 space-y-1.5">
+                            <div className="text-xs text-slate-500 font-bold uppercase tracking-widest mb-1">📊 主要判斷依據</div>
+                            {result.stageEvidence.map((ev: string, idx: number) => (
+                                <div key={idx} className="text-sm text-slate-300 flex items-start gap-1.5 pl-1">
+                                    <span className="text-indigo-400 mt-0.5">•</span>
+                                    <span className="leading-relaxed">{ev}</span>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+
+                    <div className={`p-4 rounded-2xl border ${
+                        result.operationAdvice === 'buy' ? 'bg-emerald-500/5 border-emerald-500/20 text-emerald-300' :
+                        result.operationAdvice === 'hold' ? 'bg-amber-500/5 border-amber-500/20 text-amber-300' :
+                        'bg-rose-500/5 border-rose-500/20 text-rose-300'
+                    }`}>
+                        <div className="text-xs font-black uppercase tracking-widest mb-1">💡 操作建議</div>
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mt-1">
+                            <span className="text-base md:text-lg font-black flex items-center gap-1.5">
+                                <span>{result.operationAdvice === 'buy' ? '🟢 進場買入' : result.operationAdvice === 'hold' ? '🟡 持倉/等待' : '🔴 賣出/停損'}</span>
+                            </span>
+                            <span className="text-xs font-bold opacity-80 sm:text-right">
+                                操盤生命線：<span className="underline decoration-indigo-500/50 underline-offset-4">{result.masterLifeline}</span>
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* Traffic Light */}
             <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-2xl flex flex-col items-center justify-center relative overflow-hidden">
                 <div className="flex items-center gap-2 mb-6">
@@ -422,14 +511,22 @@ export default function SmartNavigatorPage() {
     
     // Default Search State
     const [stockId, setStockId] = useState('');
-    const [period, setPeriod] = useState('30');
+    const [period, setPeriod] = useState('15');
+    const [masterType, setMasterType] = useState<'insider' | 'institutional' | 'foreign'>('insider');
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [result, setResult] = useState<any>(null);
 
+    const handleSelectMasterType = (type: 'insider' | 'institutional' | 'foreign') => {
+        setMasterType(type);
+        const newPeriod = type === 'insider' ? '15' : type === 'institutional' ? '40' : '120';
+        setPeriod(newPeriod);
+        setAutoPeriod(newPeriod);
+    };
+
     // Auto Filter State
     const [showAutoFilter, setShowAutoFilter] = useState(false);
-    const [autoPeriod, setAutoPeriod] = useState('90');
+    const [autoPeriod, setAutoPeriod] = useState('15');
     const [maxPosition, setMaxPosition] = useState('70');
     const [scanRecords, setScanRecords] = useState<any[]>([]);
     const [selectedDates, setSelectedDates] = useState<string[]>([]);
@@ -737,7 +834,7 @@ export default function SmartNavigatorPage() {
         setShowAutoFilter(false);
 
         try {
-            const res = await fetch(`/api/smart-navigator?stockId=${stockId}&period=${period}`);
+            const res = await fetch(`/api/smart-navigator?stockId=${stockId}&period=${period}&masterType=${masterType}`);
             const json = await res.json();
 
             if (!json.success) {
@@ -811,7 +908,7 @@ export default function SmartNavigatorPage() {
 
                 const batchPromises = batch.map(async (stock) => {
                     try {
-                        const res = await fetch(`/api/smart-navigator?stockId=${stock.id}&period=${autoPeriod}`);
+                        const res = await fetch(`/api/smart-navigator?stockId=${stock.id}&period=${autoPeriod}&masterType=${masterType}`);
                         const json = await res.json();
                         if (json.success && json.data) {
                             if (filterMode === 'green') {
@@ -914,12 +1011,34 @@ export default function SmartNavigatorPage() {
                         <Compass className="w-6 h-6 text-indigo-400" />
                         <span className="text-lg font-black text-indigo-400 tracking-widest">SMART NAVIGATOR</span>
                     </div>
-                    <h1 className="text-5xl font-black text-white mb-4">智能選股導航</h1>
-                    <p className="text-slate-400">極簡化操作，一鍵獲取白話佈局建議</p>
+                    <h1 className="text-5xl font-black text-white mb-4">主力AI分析判斷</h1>
+                    <p className="text-slate-400">三大主力類型分析・AI辨識主力操盤階段</p>
                 </div>
 
                 {/* Input Area */}
                 <div id="stock-search-panel" className="bg-slate-900 border border-slate-800 rounded-3xl p-6 mb-8 shadow-2xl relative overflow-hidden">
+                    {/* 三大主力選擇按鈕 */}
+                    <div className="w-full grid grid-cols-3 gap-3 mb-6 relative z-10">
+                        {([
+                            { key: 'insider', label: '🎯 業內主力', sub: '5–15 天' },
+                            { key: 'institutional', label: '🏛️ 投信主力', sub: '20–40 天' },
+                            { key: 'foreign', label: '🌏 外資主力', sub: '60–120 天' }
+                        ] as const).map(({ key, label, sub }) => (
+                            <button
+                                key={key}
+                                onClick={() => handleSelectMasterType(key)}
+                                className={`flex flex-col items-center justify-center p-3 rounded-2xl border transition-all active:scale-95 ${
+                                    masterType === key
+                                        ? 'bg-indigo-600/20 border-indigo-500 text-indigo-300 shadow-[0_0_15px_rgba(99,102,241,0.25)]'
+                                        : 'bg-black/30 border-slate-800 text-slate-400 hover:bg-slate-800/40 hover:text-slate-200'
+                                }`}
+                            >
+                                <span className="font-black text-sm md:text-base">{label}</span>
+                                <span className="text-[10px] opacity-75 mt-0.5">{sub}</span>
+                            </button>
+                        ))}
+                    </div>
+
                     <div className="flex flex-col md:flex-row flex-wrap gap-4 relative z-10">
                         <input
                             type="text"
@@ -929,22 +1048,12 @@ export default function SmartNavigatorPage() {
                             onChange={(e) => setStockId(e.target.value)}
                             onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
                         />
-                        <select
-                            value={period}
-                            onChange={(e) => setPeriod(e.target.value)}
-                            className="bg-black/50 border border-slate-700 rounded-xl px-6 py-4 text-lg font-bold text-white focus:outline-none focus:border-indigo-500 transition-all cursor-pointer"
-                        >
-                            <option value="30">近 30 日</option>
-                            <option value="60">近 60 日</option>
-                            <option value="90">近 90 日</option>
-                            <option value="120">近 120 日</option>
-                        </select>
                         <button
                             onClick={handleSearch}
                             disabled={isLoading || !stockId}
                             className="bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 disabled:text-slate-500 text-white font-black px-6 py-4 rounded-xl transition-all flex items-center justify-center gap-2 min-w-[120px]"
                         >
-                            {isLoading ? <Loader2 className="w-6 h-6 animate-spin" /> : '開始導航'}
+                            {isLoading ? <Loader2 className="w-6 h-6 animate-spin" /> : '開始分析'}
                         </button>
                         <button
                             onClick={() => setShowAutoFilter(!showAutoFilter)}
@@ -991,7 +1100,8 @@ export default function SmartNavigatorPage() {
                                             <button
                                                 onClick={() => {
                                                     setFilterMode('green');
-                                                    setAutoPeriod('90');
+                                                    const p = masterType === 'insider' ? '15' : masterType === 'institutional' ? '40' : '120';
+                                                    setAutoPeriod(p);
                                                 }}
                                                 className={`flex-1 py-2.5 rounded-xl text-sm font-black border transition-all ${filterMode === 'green' ? 'bg-indigo-500/20 border-indigo-500 text-indigo-400' : 'bg-black/40 border-slate-700 text-slate-400 hover:bg-slate-800'}`}
                                             >
@@ -1008,14 +1118,39 @@ export default function SmartNavigatorPage() {
                                             </button>
                                         </div>
                                     </div>
+                                    
+                                    {/* Master Type selection inside Auto-Filter */}
                                     <div>
-                                        <div className="text-sm text-slate-400 mb-2 font-medium">2. 數據日期區間</div>
-                                        <div className="grid grid-cols-4 gap-2">
-                                            {['30', '60', '90', '120'].map(p => (
+                                        <div className="text-sm text-slate-400 mb-2 font-medium">2. 主力類型</div>
+                                        <div className="flex gap-2">
+                                            {([
+                                                { key: 'insider', label: '業內主力' },
+                                                { key: 'institutional', label: '投信主力' },
+                                                { key: 'foreign', label: '外資主力' }
+                                            ] as const).map(({ key, label }) => (
+                                                <button
+                                                    key={key}
+                                                    onClick={() => handleSelectMasterType(key)}
+                                                    className={`flex-1 py-2.5 rounded-xl text-xs font-black border transition-all ${
+                                                        masterType === key
+                                                            ? 'bg-indigo-600/20 border-indigo-500 text-indigo-300 shadow-[0_0_10px_rgba(99,102,241,0.15)]'
+                                                            : 'bg-black/40 border-slate-700 text-slate-400 hover:bg-slate-800'
+                                                    }`}
+                                                >
+                                                    {label}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    <div>
+                                        <div className="text-sm text-slate-400 mb-2 font-medium">3. 數據日期區間</div>
+                                        <div className="grid grid-cols-6 gap-1">
+                                            {['15', '30', '40', '60', '90', '120'].map(p => (
                                                 <button
                                                     key={p}
                                                     onClick={() => setAutoPeriod(p)}
-                                                    className={`py-2 rounded-lg text-sm font-bold border transition-colors ${autoPeriod === p ? 'bg-indigo-600/20 border-indigo-500 text-indigo-400' : 'bg-black/40 border-slate-700 text-slate-400 hover:bg-slate-800'}`}
+                                                    className={`py-2 rounded-lg text-xs font-bold border transition-colors ${autoPeriod === p ? 'bg-indigo-600/20 border-indigo-500 text-indigo-400' : 'bg-black/40 border-slate-700 text-slate-400 hover:bg-slate-800'}`}
                                                 >
                                                     {p}天
                                                 </button>
