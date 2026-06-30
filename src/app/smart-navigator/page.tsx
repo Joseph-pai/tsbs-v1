@@ -287,14 +287,17 @@ function ResultCard({ result, stockId, stockName, overrideLight, overrideLightTe
 
             {/* Traffic Light */}
             <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-2xl flex flex-col items-center justify-center relative overflow-hidden">
-                <div className="flex items-center gap-2 mb-6">
-                    <div className="text-slate-400 font-black tracking-widest text-sm uppercase">目前狀態燈號</div>
-                    <button 
-                        onClick={() => setShowDetails(!showDetails)}
-                        className="text-slate-500 hover:text-indigo-400 transition-colors"
-                    >
-                        <HelpCircle className="w-4 h-4" />
-                    </button>
+                <div className="flex flex-col items-center gap-1.5 mb-6">
+                    <div className="flex items-center gap-2">
+                        <div className="text-slate-400 font-black tracking-widest text-sm uppercase">📊 短線技術燈號</div>
+                        <button 
+                            onClick={() => setShowDetails(!showDetails)}
+                            className="text-slate-500 hover:text-indigo-400 transition-colors"
+                        >
+                            <HelpCircle className="w-4 h-4" />
+                        </button>
+                    </div>
+                    <div className="text-xs text-slate-600 font-bold">基於短期量價結構・5–20 交易日視角</div>
                 </div>
 
                 {showDetails && (
@@ -382,7 +385,7 @@ function ResultCard({ result, stockId, stockName, overrideLight, overrideLightTe
                     >
                         <div className={`font-black text-base mb-1 flex items-center gap-2 ${titleColor}`}>
                             {isSafe ? <span className="text-xl">✅</span> : <AlertTriangle className="w-5 h-5" />}
-                            主力動向預警
+                            主力動向預警 (短線視角)
                         </div>
                         <div className={`text-xl font-black mb-5 ${titleColor}`}>{levelLabel}</div>
 
