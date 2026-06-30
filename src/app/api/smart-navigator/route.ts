@@ -723,10 +723,9 @@ export async function GET(request: Request) {
             masterPeriod = '5–15天';
             masterLifeline = '5日均線(MA5)';
 
-            const isInsiderMarkup = !!(ma5 && latestClose > ma5 && volumeRatio > 1.5 && isMacdPositive && positionPercent >= 35);
             const isInsiderDistribution = !!(positionPercent > 60 && (distributionLevel === 'alert' || distributionLevel === 'fatal' || isViolentDistribution || (ma5 && latestClose < ma5 && isHighTurnover)));
-            const isInsiderShakeout = !!((ma5 && latestClose < ma5) && (ma20 && latestClose >= ma20) && (isShrinkingTurnover || isVcpSqueeze || isWyckoffSpring));
-            const isInsiderAccumulation = !!(positionPercent < 35 && (hasBaseBuilding || accumulationScore > 3 || isAccumulationVolume || isModerateVolume));
+            const isInsiderMarkup = !isInsiderDistribution && !!(ma5 && latestClose > ma5 && (volumeRatio > 1.2 || isHighTurnover) && isMacdPositive && positionPercent >= 30);
+            const isInsiderShakeout = !isInsiderDistribution && !isInsiderMarkup && !!(ma20 && latestClose >= ma20 && (ma5 && latestClose < ma5 || isShrinkingTurnover || isVcpSqueeze || isWyckoffSpring));
 
             if (isInsiderDistribution) {
                 masterStage = 'distribution';
@@ -746,20 +745,16 @@ export async function GET(request: Request) {
                 stageEvidence.push('股價跌破5MA，但守穩月線(MA20)');
                 if (isShrinkingTurnover) stageEvidence.push('洗盤縮量，籌碼惜售');
                 if (isVcpSqueeze) stageEvidence.push('VCP波動收斂，變盤在即');
-            } else if (isInsiderAccumulation) {
+            } else {
                 masterStage = 'accumulation';
                 operationAdvice = 'buy';
                 stageEvidence.push('股價處於低檔整理，主力低調吃貨');
                 if (hasBaseBuilding) stageEvidence.push('低檔築底天數充足');
-                if (accumulationScore > 3) stageEvidence.push(`主力累積吸籌 ${accumulationScore} 天`);
-            } else {
-                masterStage = 'none';
-                operationAdvice = 'hold';
-                stageEvidence.push('目前無明顯業內主力操盤跡象');
+                if (accumulationScore > 0) stageEvidence.push(`主力累積吸籌 ${accumulationScore} 天`);
             }
 
             const insiderMatchCount = [
-                isInsiderMarkup || isInsiderAccumulation || isInsiderShakeout || isInsiderDistribution,
+                isInsiderMarkup || isInsiderShakeout || isInsiderDistribution,
                 volumeRatio > 2,
                 isMacdPositive,
                 accumulationScore > 5
@@ -770,10 +765,9 @@ export async function GET(request: Request) {
             masterPeriod = '20–40天';
             masterLifeline = '10日均線(MA10)';
 
-            const isInstMarkup = !!(itConsecutiveBuyDays >= 3 && ma10 && latestClose > ma10 && ma20 && latestClose > ma20);
-            const isInstDistribution = !!((positionPercent > 60 && itAccumulation < 0) || (ma10 && latestClose < ma10 && itConsecutiveBuyDays === 0) || distributionLevel === 'alert');
-            const isInstShakeout = !!((ma10 && latestClose < ma10) && (ma20 && latestClose >= ma20) && isShrinkingTurnover && itAccumulation > 0);
-            const isInstAccumulation = !!(positionPercent < 50 && (itConsecutiveBuyDays > 0 || itAccumulation > 0) && (hasBaseBuilding || isAccumulationVolume));
+            const isInstDistribution = !!(positionPercent > 60 && (itAccumulation < 0 || distributionLevel === 'alert' || (ma10 && latestClose < ma10 && itConsecutiveBuyDays === 0)));
+            const isInstMarkup = !isInstDistribution && !!(ma10 && latestClose > ma10 && ma20 && latestClose > ma20 && (itConsecutiveBuyDays >= 2 || isHighTurnover || volumeRatio > 1.2));
+            const isInstShakeout = !isInstDistribution && !isInstMarkup && !!(ma20 && latestClose >= ma20 && (itAccumulation > 0 || isShrinkingTurnover || isVcpSqueeze));
 
             if (isInstDistribution) {
                 masterStage = 'distribution';
@@ -784,28 +778,30 @@ export async function GET(request: Request) {
             } else if (isInstMarkup) {
                 masterStage = 'markup';
                 operationAdvice = 'buy';
-                stageEvidence.push(`投信連續買超達 ${itConsecutiveBuyDays} 天`);
+                if (itConsecutiveBuyDays > 0) {
+                    stageEvidence.push(`投信連續買超達 ${itConsecutiveBuyDays} 天`);
+                } else {
+                    stageEvidence.push('投信呈潛在佈局，量價技術突破中');
+                }
                 stageEvidence.push('股價穩站10日生命線(MA10)與月線之上');
                 if (isAccumulationVolume) stageEvidence.push('紅K帶量上漲，買氣暢旺');
             } else if (isInstShakeout) {
                 masterStage = 'shakeout';
                 operationAdvice = 'hold';
                 stageEvidence.push('股價跌破10MA但月線(MA20)有撐');
-                stageEvidence.push('成交量萎縮，投信並未大舉倒貨');
-            } else if (isInstAccumulation) {
+                if (isShrinkingTurnover) stageEvidence.push('成交量萎縮，主力並未大舉倒貨');
+                if (itAccumulation > 0) stageEvidence.push('投信依然維持累積買超部位');
+            } else {
                 masterStage = 'accumulation';
                 operationAdvice = 'buy';
-                stageEvidence.push('投信剛開始買超建倉');
-                if (itAccumulation > 0) stageEvidence.push('投信近30日呈淨累積買超');
+                if (itConsecutiveBuyDays > 0) stageEvidence.push(`投信啟動買超建倉 ${itConsecutiveBuyDays} 天`);
+                else if (itAccumulation > 0) stageEvidence.push('投信近30日呈淨累積買超，低位吸籌');
+                else stageEvidence.push('技術面低位建倉中（投信尚未大舉建倉）');
                 if (hasBaseBuilding) stageEvidence.push('股價在低檔打底，浮額沈澱');
-            } else {
-                masterStage = 'none';
-                operationAdvice = 'hold';
-                stageEvidence.push('目前無投信認養與建倉跡象');
             }
 
             const instMatchCount = [
-                itConsecutiveBuyDays >= 3,
+                itConsecutiveBuyDays >= 2,
                 itAccumulation > 0,
                 ma10 && latestClose > ma10,
                 isAccumulationVolume
@@ -817,10 +813,9 @@ export async function GET(request: Request) {
             masterLifeline = '60日均線(MA60/季線)';
 
             const prevMa60 = calculateSMA(reversedClose.slice(1), 60) || 0;
-            const isForeignMarkup = !!(foreignConsecutiveBuyDays >= 5 && ma60 && latestClose > ma60 && ma60 > prevMa60);
-            const isForeignDistribution = !!((positionPercent > 60 && foreignAccumulation < 0) || (ma60 && latestClose < ma60) || distributionLevel === 'alert');
-            const isForeignShakeout = !!((ma20 && latestClose < ma20) && (ma60 && latestClose >= ma60) && isShrinkingTurnover && foreignAccumulation > 0);
-            const isForeignAccumulation = !!(positionPercent < 50 && (foreignConsecutiveBuyDays > 0 || foreignAccumulation > 0) && (hasBaseBuilding || ma60));
+            const isForeignDistribution = !!(positionPercent > 60 && (foreignAccumulation < 0 || distributionLevel === 'alert' || (ma60 && latestClose < ma60)));
+            const isForeignMarkup = !isForeignDistribution && !!(ma60 && latestClose > ma60 && ma60 >= prevMa60 && (foreignConsecutiveBuyDays >= 3 || isHighTurnover || isMacdPositive));
+            const isForeignShakeout = !isForeignDistribution && !isForeignMarkup && !!(ma60 && latestClose >= ma60 && (foreignAccumulation > 0 || isShrinkingTurnover));
 
             if (isForeignDistribution) {
                 masterStage = 'distribution';
@@ -830,28 +825,29 @@ export async function GET(request: Request) {
             } else if (isForeignMarkup) {
                 masterStage = 'markup';
                 operationAdvice = 'buy';
-                stageEvidence.push(`外資連續買超達 ${foreignConsecutiveBuyDays} 天`);
+                if (foreignConsecutiveBuyDays > 0) {
+                    stageEvidence.push(`外資連續買超達 ${foreignConsecutiveBuyDays} 天`);
+                } else {
+                    stageEvidence.push('技術突破，大資金大波段拉升中');
+                }
                 stageEvidence.push('股價站穩季線(60MA)之上，且季線走平上揚');
                 if (isMacdPositive) stageEvidence.push('長線趨勢與中線動能多頭確認');
             } else if (isForeignShakeout) {
                 masterStage = 'shakeout';
                 operationAdvice = 'hold';
                 stageEvidence.push('股價回踩季線(60MA)或月線有撐');
-                stageEvidence.push('高位拉回量縮，外資未見撤退');
-            } else if (isForeignAccumulation) {
+                if (isShrinkingTurnover) stageEvidence.push('高位拉回量縮，外資未見撤退');
+                if (foreignAccumulation > 0) stageEvidence.push('外資仍維持累積買超淨部位');
+            } else {
                 masterStage = 'accumulation';
                 operationAdvice = 'buy';
-                stageEvidence.push('外資大資金於低檔默默建倉');
-                if (hasBaseBuilding) stageEvidence.push('長線底部整理完成');
                 if (foreignConsecutiveBuyDays > 0) stageEvidence.push(`外資開始溫和買進 ${foreignConsecutiveBuyDays} 天`);
-            } else {
-                masterStage = 'none';
-                operationAdvice = 'hold';
-                stageEvidence.push('目前無外資大波段建倉跡象');
+                else stageEvidence.push('技術面季線打底整理中（外資尚未大舉買超）');
+                if (hasBaseBuilding) stageEvidence.push('長線底部打底整理完成');
             }
 
             const foreignMatchCount = [
-                foreignConsecutiveBuyDays >= 5,
+                foreignConsecutiveBuyDays >= 3,
                 foreignAccumulation > 0,
                 ma60 && latestClose > ma60,
                 isMacdPositive
