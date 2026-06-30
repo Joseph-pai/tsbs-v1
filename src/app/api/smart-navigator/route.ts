@@ -46,7 +46,7 @@ export async function GET(request: Request) {
 
         // Parallelize all external data fetching with Redis cache wrapper
         const [pricesRaw, _, totalShares, taiexHistoryRaw, marginDataRaw, dayTradingDataRaw, institutionalDataRaw, institutionalBuySellRaw] = await Promise.all([
-            getCachedOrFetch(`tsbs:raw:hist:${stockId}:${todayStr}`, () => ExchangeClient.getStockHistory(stockId, 6)),
+            getCachedOrFetch(`tsbs:raw:hist:${stockId}:${todayStr}`, () => ExchangeClient.getStockHistory(stockId, 8)),
             ExchangeClient.getIndustryMapping().catch(() => ({})),
             getCachedOrFetch(`tsbs:raw:shares:${stockId}:${todayStr}`, () => getTotalShares(stockId).catch(() => 0), 86400),
             getCachedOrFetch(`tsbs:raw:taiex:${todayStr}`, () => ExchangeClient.getTaiexHistory(3).catch(() => []), 14400), // 3 months of TAIEX
