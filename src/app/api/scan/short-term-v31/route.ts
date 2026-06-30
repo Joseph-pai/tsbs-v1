@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { ScannerService } from '@/services/scanner';
+import { ExchangeClient } from '@/lib/exchange';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -11,6 +12,22 @@ export async function POST(req: Request) {
         const body = await req.json();
         const market = (body.market || 'TWSE') as 'TWSE' | 'TPEX';
         const stockIds = body.stockIds as string[] | undefined;
+        const action = body.action as string | undefined;
+
+        if (action === 'candidates') {
+            console.log(`[ShortTermV31_API] 取得全市場候選代號: market=${market}`);
+            const snapshot = await ExchangeClient.getAllMarketQuotes(market);
+            const candidates = snapshot.filter(s =>
+                s.Trading_Volume >= 300 &&
+                s.close >= 5 &&
+                s.close > 0
+            ).map(s => s.stock_id);
+
+            return NextResponse.json({
+                success: true,
+                candidates
+            });
+        }
 
         console.log(`[ShortTermV31_API] 開始短線過濾掃描 v3.1: market=${market}, 模式=${stockIds && stockIds.length > 0 ? '歷史模式' : '即時模式'}`);
 

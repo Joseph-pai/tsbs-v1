@@ -844,14 +844,13 @@ export default function DashboardPage() {
     setActiveTab('shortterm');
     setShortTermResults([]);
     setShortTermMeta(null);
-    setShortTermProgress({ current: 0, total: 200, phase: '正在取得大盤與個股資料...' });
+    setShortTermProgress({ current: 0, total: 100, phase: '正在初始化...' });
 
     try {
-      setShortTermProgress({ current: 20, total: 200, phase: '正在預篩選候選股...' });
-
       let stockIds: string[] = [];
+
       if (shortTermSelectedDates.size > 0) {
-        // Collect all stocks from the selected historical dates
+        // ── 歷史模式 ──
         const ids = new Set<string>();
         historyRecords.forEach(r => {
           if (r.scanDate && shortTermSelectedDates.has(r.scanDate)) {
@@ -863,24 +862,71 @@ export default function DashboardPage() {
         if (stockIds.length === 0) {
             throw new Error('選擇的日期中沒有歷史掃描數據');
         }
-        setShortTermProgress({ current: 30, total: 200, phase: `從歷史紀錄提取 ${stockIds.length} 支股票，開始 v3.1 評分...` });
+        setShortTermProgress({ current: 10, total: 100, phase: `從歷史紀錄提取 ${stockIds.length} 檔個股，準備分析...` });
+      } else {
+        // ── 即時全市場模式 ──
+        setShortTermProgress({ current: 5, total: 100, phase: '正在取得全市場候選股名單...' });
+        const res = await fetch('/api/scan/short-term-v31', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ market, action: 'candidates' })
+        });
+        const json = await res.json();
+        if (!json.success) throw new Error(json.error || '無法取得候選股名單');
+        stockIds = json.candidates || [];
       }
 
-      const res = await fetch(`/api/scan/short-term-v31`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      if (stockIds.length === 0) {
+        throw new Error('目前無可分析的候選股票');
+      }
+
+      // ── 分批執行短線掃描 ──
+      const BATCH_SIZE = 30;
+      const allResults: any[] = [];
+      let finalMeta: any = null;
+      let finalTiming: any = null;
+      const totalBatches = Math.ceil(stockIds.length / BATCH_SIZE);
+
+      for (let i = 0; i < stockIds.length; i += BATCH_SIZE) {
+        const batchIds = stockIds.slice(i, i + BATCH_SIZE);
+        const batchIndex = Math.floor(i / BATCH_SIZE) + 1;
+        
+        setShortTermProgress({
+          current: Math.round((batchIndex / totalBatches) * 85) + 10,
+          total: 100,
+          phase: `正在分析第 ${batchIndex} / ${totalBatches} 批股票... (已找到 ${allResults.length} 檔符合個股)`
+        });
+
+        const res = await fetch(`/api/scan/short-term-v31`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
             market: market,
-            stockIds: stockIds.length > 0 ? stockIds : undefined
-        })
-      });
-      const json = await res.json();
+            stockIds: batchIds
+          })
+        });
+        const json = await res.json();
+        if (json.success) {
+          if (json.data && Array.isArray(json.data)) {
+            allResults.push(...json.data);
+          }
+          if (json.meta) {
+            finalMeta = json.meta;
+          }
+          if (json.timing) {
+            finalTiming = json.timing;
+          }
+        } else {
+          console.warn(`[ShortTermScan] 批次 ${batchIndex} 分析失敗:`, json.error);
+        }
+      }
 
-      if (!json.success) throw new Error(json.error || '短線掃描失敗');
+      // 按評分從高到低排序
+      allResults.sort((a, b) => (b.scoreD123 || 0) - (a.scoreD123 || 0));
 
-      setShortTermProgress({ current: 200, total: 200, phase: `短線掃描完成：找到 ${json.count} 支` });
-      setShortTermResults(json.data || []);
-      setShortTermMeta(json.meta || null);
+      setShortTermProgress({ current: 100, total: 100, phase: `短線過濾掃描完成！共篩選出 ${allResults.length} 檔個股` });
+      setShortTermResults(allResults);
+      setShortTermMeta(finalMeta);
       setHasShortTermScanned(true);
 
     } catch (e: any) {
