@@ -1081,9 +1081,9 @@ export const ScannerService = {
         }
 
         // ── 放寬門檻（目標：找20日潛力股）──
-        const vsrHardFilter = conservativeMode ? 1.5 : 1.2;
-        const rsThreshold = conservativeMode ? 0.5 : -1.0;
-        const dim4EntryGate = 35; // 降低進入Dim4門檻（原本45）
+        const vsrHardFilter = conservativeMode ? 1.2 : 0.8;
+        const rsThreshold = conservativeMode ? -1.0 : -3.0;
+        const dim4EntryGate = 25; // 降低進入Dim4門檻（原本35）
 
         console.log(`[ShortTermV31] 大盤位階: ${(marketLevel * 100).toFixed(1)}% → 模式: ${conservativeMode ? '保守' : '正常'} (VSR門檻: ${vsrHardFilter}, RS門檻: ${rsThreshold}%)`);
 
@@ -1181,6 +1181,8 @@ export const ScannerService = {
                             rsScoreFinal = 25;
                         } else if (today.close > ma20) {
                             rsScoreFinal = 20;
+                        } else if (taiexHistory.length === 0) {
+                            rsScoreFinal = 15; // 缺大盤資料，給中性分數
                         } else if (rsScoreRaw > 0) {
                             rsScoreFinal = 12;
                         } else {
@@ -1203,7 +1205,7 @@ export const ScannerService = {
                         } else if (kBodyPct > 0.5 && upperShadow < 0.2) {
                             kScore = 15;
                         } else if (kBodyPct > 0.3) {
-                            kScore = 10; // 小陽線也給分（20日潛力）
+                            kScore = 15; // 小陽線也給分（20日潛力）
                         } else {
                             kScore = 5;
                         }
@@ -1219,8 +1221,6 @@ export const ScannerService = {
                         }
 
                         let freshnessMult = 1.0;
-                        if (trendDays >= 4) freshnessMult = 0.8;
-                        else if (trendDays === 3) freshnessMult = 0.9;
 
                         // ── 20日潛力加分項目 ──
                         let bonusScore = 0;
