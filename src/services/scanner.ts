@@ -1083,7 +1083,7 @@ export const ScannerService = {
         // ── 放寬門檻（目標：找20日潛力股）──
         const vsrHardFilter = conservativeMode ? 1.2 : 0.8;
         const rsThreshold = conservativeMode ? -1.0 : -3.0;
-        const dim4EntryGate = 25; // 降低進入Dim4門檻（原本35）
+        const dim4EntryGate = 20; // 降低進入Dim4門檻（原本35 -> 25 -> 20）
 
         console.log(`[ShortTermV31] 大盤位階: ${(marketLevel * 100).toFixed(1)}% → 模式: ${conservativeMode ? '保守' : '正常'} (VSR門檻: ${vsrHardFilter}, RS門檻: ${rsThreshold}%)`);
 
@@ -1138,7 +1138,7 @@ export const ScannerService = {
                         if (todayVol < 300 || today.close < 5) return null;
 
                         const hlRange = today.max - today.min;
-                        if (hlRange < 0.01) return null;
+                        if (hlRange < 0.001) return null;
 
                         const isLimitUp = (today.close / prevClose - 1) * 100 >= 9.95;
                         const dailyRet = (today.close / prevClose - 1) * 100;
@@ -1148,7 +1148,7 @@ export const ScannerService = {
                         const vol20Avg = priorVolumes.reduce((a: number, b: number) => a + b, 0) / Math.max(priorVolumes.length, 1);
                         const vsr = vol20Avg > 0 ? todayVol / vol20Avg : 0;
 
-                        if (!isLimitUp && vsr < vsrHardFilter) return null;
+                        // if (!isLimitUp && vsr < vsrHardFilter) return null; // 放寬：不再直接淘汰
 
                         let vsrScore = 0;
                         if (isLimitUp) {
@@ -1157,9 +1157,15 @@ export const ScannerService = {
                             vsrScore = 35;
                         } else if (vsr >= 1.5) {
                             vsrScore = 25 + ((vsr - 1.5) / 0.5) * 9;
-                        } else {
+                        } else if (vsr >= 1.2) {
                             // 1.2–1.5 區間線性插值 18–25
                             vsrScore = 18 + ((vsr - 1.2) / 0.3) * 7;
+                        } else if (vsr >= 0.8) {
+                            // 0.8-1.2 區間 => 給予 12-18分
+                            vsrScore = 12 + ((vsr - 0.8) / 0.4) * 6;
+                        } else {
+                            // 極低量也給予基礎分，確保能進入後續判定
+                            vsrScore = Math.max(5, vsr * 10);
                         }
 
                         // ── Dim 1: RS 相對強度（雙軌制） ──
