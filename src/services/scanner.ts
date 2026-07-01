@@ -1181,7 +1181,7 @@ export const ScannerService = {
                             rsScoreFinal = 25;
                         } else if (today.close > ma20) {
                             rsScoreFinal = 20;
-                        } else if (taiexHistory.length === 0) {
+                        } else if (taiexLatestClose === 0) {
                             rsScoreFinal = 15; // 缺大盤資料，給中性分數
                         } else if (rsScoreRaw > 0) {
                             rsScoreFinal = 12;
