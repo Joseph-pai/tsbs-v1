@@ -167,7 +167,10 @@ export default function DashboardPage() {
         setHasScanned(parsed.hasScanned || false);
         setTiming(parsed.timing || null);
         setEnhancedResults(parsed.enhancedResults || []);
-        // 短線掃描結果不做 session 持久化（掃描時間較長，避免誤導）
+        // 短線掃描結果原本不做持久化，依使用者要求加入以避免返回時遺失
+        setShortTermResults(parsed.shortTermResults || []);
+        setShortTermMeta(parsed.shortTermMeta || null);
+        setHasShortTermScanned(parsed.hasShortTermScanned || false);
         const savedTab = parsed.activeTab;
         setActiveTab(savedTab === 'original' || savedTab === 'enhanced' || savedTab === 'shortterm' ? savedTab : 'original');
       } catch (e) {
@@ -178,9 +181,10 @@ export default function DashboardPage() {
 
   useEffect(() => {
     sessionStorage.setItem('tsbs_scanner_state', JSON.stringify({
-      results, settings, market, sector, hasScanned, timing, enhancedResults, activeTab
+      results, settings, market, sector, hasScanned, timing, enhancedResults, activeTab,
+      shortTermResults, shortTermMeta, hasShortTermScanned
     }));
-  }, [results, settings, market, sector, hasScanned, timing, enhancedResults, activeTab]);
+  }, [results, settings, market, sector, hasScanned, timing, enhancedResults, activeTab, shortTermResults, shortTermMeta, hasShortTermScanned]);
 
   // 2. Heavy Market Data Caching (Session-based)
   useEffect(() => {
