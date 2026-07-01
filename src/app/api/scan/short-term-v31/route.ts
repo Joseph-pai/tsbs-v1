@@ -21,7 +21,10 @@ export async function POST(req: Request) {
                 s.Trading_Volume >= 300 &&
                 s.close >= 5 &&
                 s.close > 0
-            ).map(s => s.stock_id);
+            )
+            .sort((a, b) => b.Trading_Volume - a.Trading_Volume)
+            .slice(0, 300)
+            .map(s => s.stock_id);
 
             return NextResponse.json({
                 success: true,

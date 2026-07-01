@@ -1121,7 +1121,20 @@ export const ScannerService = {
                         if (cached) prices = JSON.parse(cached);
 
                         if (prices.length < 25) {
-                            prices = await ExchangeClient.getStockHistory(stock.stock_id, 3);
+                            try {
+                                const startDate = format(subDays(new Date(), 45), 'yyyy-MM-dd');
+                                const fmPrices = await FinMindClient.getDailyStats({ stockId: stock.stock_id, startDate, endDate: todayStr });
+                                if (fmPrices && fmPrices.length > 0) {
+                                    prices = fmPrices.map((p: any) => ({
+                                        ...p,
+                                        Trading_Volume: p.Trading_Volume / 1000
+                                    }));
+                                } else {
+                                    prices = await ExchangeClient.getStockHistory(stock.stock_id, 2);
+                                }
+                            } catch (e) {
+                                prices = await ExchangeClient.getStockHistory(stock.stock_id, 2);
+                            }
                             if (prices.length > 0) {
                                 await redis.set(priceCacheKey, JSON.stringify(prices), 'EX', 86400);
                             }
@@ -1321,16 +1334,20 @@ export const ScannerService = {
         for (const item of passedD3) {
             try {
                 let insts: any[] = [];
-                const instCacheKey = `tsbs:v31:chip:${item.stock.stock_id}:${todayStr}`;
-                const cached = await redis.get(instCacheKey);
-                if (cached) insts = JSON.parse(cached);
+                try {
+                    const instCacheKey = `tsbs:v31:chip:${item.stock.stock_id}:${todayStr}`;
+                    const cached = await redis.get(instCacheKey);
+                    if (cached) insts = JSON.parse(cached);
 
-                if (insts.length === 0) {
-                    const startDate = format(subDays(new Date(), 7), 'yyyy-MM-dd');
-                    insts = await FinMindClient.getInstitutional({ stockId: item.stock.stock_id, startDate, endDate: todayStr });
-                    if (insts.length > 0) {
-                        await redis.set(instCacheKey, JSON.stringify(insts), 'EX', 14400);
+                    if (insts.length === 0) {
+                        const startDate = format(subDays(new Date(), 7), 'yyyy-MM-dd');
+                        insts = await FinMindClient.getInstitutional({ stockId: item.stock.stock_id, startDate, endDate: todayStr });
+                        if (insts.length > 0) {
+                            await redis.set(instCacheKey, JSON.stringify(insts), 'EX', 14400);
+                        }
                     }
+                } catch (fmError) {
+                    console.warn(`[ShortTermV31] FinMind error for ${item.stock.stock_id}, fallback to 0 chip score.`);
                 }
 
                 // 取今日法人淨買賣
