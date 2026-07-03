@@ -1,7 +1,7 @@
 import { FinMindClient, } from '@/lib/finmind';
 import { FinMindExtras } from '@/lib/finmind';
 import { ExchangeClient, normalizeAnyDate } from '@/lib/exchange';
-import { evaluateStock, calculateVRatio, checkMaConstrict, checkVolumeIncreasing, checkGapUp, checkMarginSqueezeSignal, checkVcpCondition } from './engine';
+import { evaluateStock, calculateVRatio, checkMaConstrict, checkVolumeIncreasing, checkGapUp, checkMarginSqueezeSignal } from './engine';
 import { AnalysisResult, StockData } from '@/types';
 import { format, subDays } from 'date-fns';
 import { calculateSMA } from './indicators';
@@ -64,92 +64,6 @@ function normalizeMonthlyDate(dateStr: string): string {
     console.warn(`[normalizeMonthlyDate] Unrecognized monthly date format: ${dateStr}`);
     return s;
 }
-/**
- * 共用函式：取得大盤位階模式
- * 提取自 scanShortTerm，供 scanMarket 與 scanShortTerm 共同使用。
- * @returns { marketLevel, marketMode, indexReturn20, taiexHistory, fallbackMode, indexFailedWarning }
- */
-async function getMarketMode(): Promise<{
-    marketLevel: number;
-    marketMode: 'normal' | 'strict' | 'extreme';
-    indexReturn20: number;
-    taiexHistory: any[];
-    fallbackMode: boolean;
-    indexFailedWarning?: string;
-}> {
-    let marketLevel = 0.5;
-    let fallbackMode = false;
-    let indexFailedWarning: string | undefined;
-    let taiexHistory: any[] = [];
-
-    try {
-        const todayStr = format(new Date(), 'yyyy-MM-dd');
-        const redis = (await import('@/lib/redis')).redis;
-
-        const indexCacheKey = `tsbs:raw:index:TAIEX60:${todayStr}`;
-        try {
-            const cached = await redis.get(indexCacheKey);
-            if (cached) taiexHistory = JSON.parse(cached);
-        } catch (_) {}
-
-        if (taiexHistory.length < 10) {
-            const startDate = format(subDays(new Date(), 90), 'yyyy-MM-dd');
-            taiexHistory = await FinMindClient.getDailyStats({
-                stockId: 'TAIEX',
-                startDate,
-                endDate: todayStr
-            });
-            if (taiexHistory.length > 0) {
-                try { await redis.set(indexCacheKey, JSON.stringify(taiexHistory), 'EX', 14400); } catch (_) {}
-            }
-        }
-
-        if (taiexHistory.length >= 60) {
-            const recent60 = taiexHistory.slice(-60);
-            const closes60 = recent60.map((d: any) => d.close || d.Close || 0).filter((v: number) => v > 0);
-            if (closes60.length >= 10) {
-                const min60 = Math.min(...closes60);
-                const max60 = Math.max(...closes60);
-                const currentClose = closes60[closes60.length - 1];
-                marketLevel = max60 > min60 ? (currentClose - min60) / (max60 - min60) : 0.5;
-            }
-        } else if (taiexHistory.length >= 10) {
-            const closes = taiexHistory.slice(-Math.min(taiexHistory.length, 60)).map((d: any) => d.close || d.Close || 0).filter((v: number) => v > 0);
-            const min = Math.min(...closes);
-            const max = Math.max(...closes);
-            const current = closes[closes.length - 1];
-            marketLevel = max > min ? (current - min) / (max - min) : 0.5;
-        }
-    } catch (e: any) {
-        fallbackMode = true;
-        indexFailedWarning = '無法取得大盤資料，已切換至嚴格模式';
-        marketLevel = 0.65;
-        console.warn('[getMarketMode] 大盤資料獲取失敗，使用 fallback 嚴格模式:', e.message);
-    }
-
-    // 根據大盤位階決定模式
-    let marketMode: 'normal' | 'strict' | 'extreme';
-    if (marketLevel < 0.60) {
-        marketMode = 'normal';
-    } else if (marketLevel <= 0.80) {
-        marketMode = 'strict';
-    } else {
-        marketMode = 'extreme';
-    }
-
-    // 計算大盤 20 日漲幅（供 RS 計算）
-    let indexReturn20 = 0;
-    if (taiexHistory.length >= 20) {
-        const idx20 = taiexHistory.slice(-20);
-        const idxCloses = idx20.map((d: any) => d.close || d.Close || 0).filter((v: number) => v > 0);
-        if (idxCloses.length >= 2) {
-            indexReturn20 = (idxCloses[idxCloses.length - 1] - idxCloses[0]) / idxCloses[0];
-        }
-    }
-
-    return { marketLevel, marketMode, indexReturn20, taiexHistory, fallbackMode, indexFailedWarning };
-}
-
 export const ScannerService = {
     /**
      * Stage 1: Discovery (兩階段篩選 - 避免超時)
@@ -166,32 +80,9 @@ export const ScannerService = {
      * 
      * 寧缺毋濫：返回所有符合條件的股票（可能 0-15 支）
      */
-    scanMarket: async (market: 'TWSE' | 'TPEX' = 'TWSE', settings?: { volumeWeight?: number, maWeight?: number, breakoutWeight?: number, rsWeight?: number }): Promise<{
-        results: AnalysisResult[];
-        meta: { marketMode: 'normal' | 'strict' | 'extreme'; marketLevel: number; fallbackMode: boolean; indexFailedWarning?: string };
-        timing: any;
-    }> => {
+    scanMarket: async (market: 'TWSE' | 'TPEX' = 'TWSE', settings?: { volumeWeight?: number, maWeight?: number, breakoutWeight?: number, rsWeight?: number }): Promise<{ results: AnalysisResult[], timing: any }> => {
         const t0 = Date.now();
         console.log(`[Scanner] Stage 1: Discovery (${market}) - 兩階段篩選（快速預篩 + 嚴格驗證）...`);
-
-        // ── 大盤位階保護：取得市場模式 ─────────────────────────────
-        const { marketLevel, marketMode, fallbackMode, indexFailedWarning } = await getMarketMode();
-
-        // 根據市場模式動態設定門檻
-        let volThreshold: number;
-        let breakoutThreshold: number;
-        if (marketMode === 'normal') {
-            volThreshold = 2.5;
-            breakoutThreshold = 0.035;
-        } else if (marketMode === 'strict') {
-            volThreshold = 3.5;
-            breakoutThreshold = 0.05;
-        } else {
-            // extreme
-            volThreshold = 5.0;
-            breakoutThreshold = 0.05;
-        }
-        console.log(`[Scanner] 大盤位階: ${(marketLevel * 100).toFixed(1)}% → 模式: ${marketMode} (V門檻: ${volThreshold}x, 突破: ${(breakoutThreshold * 100).toFixed(1)}%)`);
 
         // Load industry mapping
         const industryMapping = await ExchangeClient.getIndustryMapping();
@@ -246,8 +137,9 @@ export const ScannerService = {
                         const volumes = history.map(s => s.Trading_Volume);
                         const vRatio = calculateVRatio(volumes);
 
+                        const volThreshold = 2.5; // 動能爆發基本門檻設定為至少 2.5倍
                         const squeezeThreshold = 0.04; // 均線糾結帶統一設定為 4%
-                        // volThreshold 與 breakoutThreshold 已由大盤位階動態決定（見上方）
+                        const breakoutThreshold = 0.035; // 突破幅度統一要求至少 3.5%
 
                         const maData = checkMaConstrict(ma5, ma20, squeezeThreshold);
                         const isBullish = ma5 > ma20;
@@ -257,9 +149,9 @@ export const ScannerService = {
 
                         const isBreakout = today.close > Math.max(ma5, ma20) && changePercent >= breakoutThreshold;
 
-                        // 三大信號共振（使用動態門檻）
+                        // 三大信號共振（參考傳入設定或預設值）
                         if (vRatio >= volThreshold && maData.isSqueezing && isBreakout && isBullish) {
-                            console.log(`[Scanner] ✓ Found: ${stock.stock_id} ${stock.stock_name} - V:${vRatio.toFixed(1)}x, MA:${(maData.constrictValue * 100).toFixed(1)}%, Break:${(changePercent * 100).toFixed(1)}% [${marketMode}]`);
+                            console.log(`[Scanner] ✓ Found: ${stock.stock_id} ${stock.stock_name} - V:${vRatio.toFixed(1)}x, MA:${(maData.constrictValue * 100).toFixed(1)}%, Break:${(changePercent * 100).toFixed(1)}%`);
 
                             const result: AnalysisResult = {
                                 stock_id: stock.stock_id,
@@ -274,7 +166,7 @@ export const ScannerService = {
                                 is_bullish: isBullish,
                                 consecutive_buy: 0,
                                 poc: today.close,
-                                verdict: `三大信號共振 - 爆發前兆 [${marketMode === 'normal' ? '正常市場' : marketMode === 'strict' ? '嚴格市場' : '極嚴格市場'}]`,
+                                verdict: '三大信號共振 - 爆發前兆',
                                 tags: ['DISCOVERY', 'VOLUME_EXPLOSION', 'MA_SQUEEZE', 'BREAKOUT'],
                                 dailyVolumeTrend: volumes.slice(-10),
                                 maConstrictValue: maData.constrictValue,
@@ -318,22 +210,10 @@ export const ScannerService = {
         console.log(`[Scanner] 總耗時: ${t3 - t0}ms (預篩: ${t2 - t1}ms, 深度: ${t3 - t2}ms)`);
 
         // 按量能倍數排序
-        let sorted = candidates.sort((a, b) => b.v_ratio - a.v_ratio);
-
-        // ── extreme 模式：截斷前 15 名（高位市場嚴格品質管控）──
-        if (marketMode === 'extreme' && sorted.length > 15) {
-            console.log(`[Scanner] extreme 模式：結果從 ${sorted.length} 截斷至前 15 名`);
-            sorted = sorted.slice(0, 15);
-        }
+        const sorted = candidates.sort((a, b) => b.v_ratio - a.v_ratio);
 
         return {
             results: sorted,
-            meta: {
-                marketMode,
-                marketLevel,
-                fallbackMode,
-                ...(indexFailedWarning ? { indexFailedWarning } : {})
-            },
             timing: {
                 snapshot: t1 - t0,
                 preFilter: t2 - t1,
@@ -348,79 +228,29 @@ export const ScannerService = {
 
     /**
      * Stage 2: Filtering (投信連買 + 法人同步 + 量能遞增)
-     * 項目5改進：
-     * - 加入 RS 硬性排除（個股 20 日漲幅 < 大盤 - 2% → 直接排除）
-     * - 評分門檻提升：normal > 0.55、strict/extreme > 0.65
-     * - 移除 passCount >= 2 兜底（防止弱勢股靠法人連買過關）
-     * - 每支結果帶出 hardFilterReasons
      */
-    filterStocks: async (stockIds: string[], settings?: { volumeWeight?: number, maWeight?: number, breakoutWeight?: number, rsWeight?: number }): Promise<{
-        results: AnalysisResult[];
-        meta: { marketMode: 'normal' | 'strict' | 'extreme'; marketLevel: number; scoreThreshold: number };
-        timing: any;
-    }> => {
+    filterStocks: async (stockIds: string[], settings?: { volumeWeight?: number, maWeight?: number, breakoutWeight?: number, rsWeight?: number }): Promise<{ results: AnalysisResult[], timing: any }> => {
         const t0 = Date.now();
         console.log(`[Scanner] Stage 2: Filtering - 深度篩選 ${stockIds.length} 支股票...`);
 
-        // ── 取得大盤位階模式（共用函式）──────────────────────────
-        const { marketMode, marketLevel, indexReturn20 } = await getMarketMode();
-
-        // 根據市場模式決定評分門檻
-        const scoreThreshold = (marketMode === 'strict' || marketMode === 'extreme') ? 0.65 : 0.55;
-        console.log(`[Scanner] 市場模式: ${marketMode}，評分門檻: ${scoreThreshold}，大盤20日漲幅: ${(indexReturn20 * 100).toFixed(2)}%`);
-
         const filtered: AnalysisResult[] = [];
-        let rsRejected = 0;
-        let scoreFailed = 0;
 
         for (const stockId of stockIds) {
             try {
                 const result = await ScannerService.analyzeStock(stockId, settings);
                 if (!result) continue;
 
-                const hardFilterReasons: string[] = [];
-
-                // ── RS 硬性排除：個股 20 日漲幅 < 大盤 20 日漲幅 - 2% ──
-                // 從 comprehensiveScoreDetails 或重新從 result 取得個股漲幅
-                // 使用 change_percent 是今日漲幅，需用 20 日漲幅來和大盤比較
-                // analyzeStock 不回傳 20 日 RS，此處用近期績效代替：
-                // 若 score < 0.3 且 change_percent < indexReturn20 - 0.02 視為相對弱勢
-                // 更精確的 RS 以 history 計算
-                if (result.history && result.history.length >= 20) {
-                    const hist = result.history;
-                    const closes = hist.map(h => h.close);
-                    const stock20 = closes.slice(-20);
-                    const stockReturn20 = stock20[0] > 0 ? (stock20[stock20.length - 1] - stock20[0]) / stock20[0] : 0;
-
-                    if (indexReturn20 !== 0 && stockReturn20 < indexReturn20 - 0.02) {
-                        hardFilterReasons.push(`RS偏弱：個股20日漲幅 ${(stockReturn20 * 100).toFixed(1)}% < 大盤 ${(indexReturn20 * 100).toFixed(1)}% - 2%`);
-                        console.log(`[Scanner] RS排除 ${stockId}：個股${(stockReturn20 * 100).toFixed(1)}% vs 大盤${(indexReturn20 * 100).toFixed(1)}%`);
-                        rsRejected++;
-                        continue; // 直接排除，不進入評分
-                    }
-                }
-
-                // ── 評分門檻（依市場模式動態調整）──────────────────
-                // 移除舊的 passCount >= 2 兜底，改為純評分門檻
+                // Stage 2 篩選條件
                 const hasInstBuying = result.consecutive_buy >= 3;
                 const hasVolumeIncreasing = result.volumeIncreasing === true;
                 const isAboveMA = result.is_ma_breakout;
 
-                if (result.score <= scoreThreshold) {
-                    // 分數不足時記錄原因（但不輸出到結果）
-                    const passCount = [hasInstBuying, hasVolumeIncreasing, isAboveMA].filter(Boolean).length;
-                    if (passCount < 3) {
-                        scoreFailed++;
-                        continue;
-                    }
-                    // 三個條件全過才允許低分通過（取代舊的 passCount >= 2）
-                }
+                // 綜合評分 > 0.4 或滿足任意兩個條件
+                const passCount = [hasInstBuying, hasVolumeIncreasing, isAboveMA].filter(Boolean).length;
 
-                // 通過篩選，帶出 hardFilterReasons（此時為空，代表完全通過）
-                filtered.push({
-                    ...result,
-                    hardFilterReasons: hardFilterReasons.length > 0 ? hardFilterReasons : undefined
-                });
+                if (result.score > 0.4 || passCount >= 2) {
+                    filtered.push(result);
+                }
             } catch (error) {
                 console.warn(`[Scanner] Error filtering ${stockId}:`, error);
             }
@@ -432,11 +262,10 @@ export const ScannerService = {
             .slice(0, 30);
 
         const t1 = Date.now();
-        console.log(`[Scanner] Stage 2 完成：篩選出 ${top30.length} 支強勢股（RS排除: ${rsRejected}，分數不足: ${scoreFailed}）`);
+        console.log(`[Scanner] Stage 2 完成：篩選出 ${top30.length} 支強勢股`);
 
         return {
             results: top30,
-            meta: { marketMode, marketLevel, scoreThreshold },
             timing: { total: t1 - t0 }
         };
     },
@@ -709,16 +538,22 @@ export const ScannerService = {
                         if (!isBullishCandle) return null;
                         if (body > 0 && upperShadow > body * 0.5) return null;
 
-                        // ── 策略三：VCP 波動率收縮（統一標準：ATR×0.60、量能×0.70）──────────
-                        // 使用共用函式 checkVcpCondition（排除今日的 priorPrices/priorVolumes）
+                        // ── 策略三：VCP 波動率收縮（四條件全滿足）──────────
+                        const getAtr = (slice: any[]) =>
+                            slice.reduce((sum, p) => sum + (p.max > 0 && p.close > 0 ? (p.max - p.min) / p.close : 0), 0) / slice.length;
 
-                        // VCP 條件：使用共用函式 checkVcpCondition（統一標準：ATR×0.60、量能×0.70）
-                        const vcpCheck = checkVcpCondition(
-                            priorPrices as { max: number; min: number; close: number }[],
-                            priorVolumes
-                        );
-                        if (!vcpCheck.isVcp) return null;
-                        // 突破爆量驗證由策略六的 priorVol45Avg × volThreshold 負責（不在此重複）
+                        // 同樣使用排除今日的 priorPrices 計算突破前的收縮情形
+                        const recent5Atr = priorPrices.length >= 5 ? getAtr(priorPrices.slice(-5)) : 999;
+                        const recent20Atr = priorPrices.length >= 20 ? getAtr(priorPrices.slice(-20)) : 999;
+                        const priorVol5Avg = priorVolumes.length >= 5 ? priorVolumes.slice(-5).reduce((a: number, b: number) => a + b, 0) / 5 : 0;
+
+                        // VCP 條件 1：突破前 5 日 ATR < 突破前 20 日 ATR × 60%
+                        if (recent5Atr >= recent20Atr * 0.60) return null;
+                        // VCP 條件 2：突破前 5 日均量 < 突破前 20 日均量 × 70%
+                        if (priorVol5Avg >= priorVol20Avg * 0.70) return null;
+                        // VCP 條件 3（修正版）：移除重複的爆量門檻，已由策略六統一負責
+                        // 原條件：todayVol > priorVol20Avg × 2.5 與策略六的 45日均量 × volThreshold 衝突
+                        // VCP 此處只驗證「收縮型態」，突破爆量驗證由策略六的 priorVol45Avg × volThreshold 負責
 
                         // ── 策略四（修正版）：RS 相對強度硬性排除（10 日改為 20 日）────
                         // 修正：10 日過短，單日波動易誤判；20 日更能反映「大盤修正時個股韌性」
@@ -747,8 +582,8 @@ export const ScannerService = {
                         // 量能評分
                         const volumeScore = vRatio >= volThreshold * 1.5 ? 40 : vRatio >= volThreshold ? 25 : 0;
 
-                        // VCP 收縮程度評分（使用 vcpCheck.atrRatio = recent5Atr / recent20Atr）
-                        const vcpScore = vcpCheck.atrRatio < 1 ? Math.max(0, 10 - vcpCheck.atrRatio * 10) : 0;
+                        // VCP 收縮程度評分
+                        const vcpScore = recent20Atr > 0 ? Math.max(0, 10 - (recent5Atr / recent20Atr) * 10) : 0;
 
                         const totalScore = volumeScore + breakoutScore + positionBonus + vcpScore + rsBonus;
 
@@ -1245,19 +1080,12 @@ export const ScannerService = {
             console.warn('[ShortTermV31] TAIEX fetch failed, defaulting to normal mode');
         }
 
-        // ── 項目2修正：高位嚴格模式（marketLevel > 80% 時門檻最嚴格）──
-        // 原邏輯：低位才保守，高位反而門檻最低 → 邏輯完全反向
-        // 修正後：高位 > 80% 啟用 highRiskMode，門檻高於保守模式
-        const highRiskMode = marketLevel > 0.80;
-
-        // VSR 硬性門檻：高位 > 低位 > 正常
-        const vsrHardFilter = highRiskMode ? 1.8 : (conservativeMode ? 1.2 : 0.8);
-        // RS 門檻：高位只接受正 RS（≥0%），低位寬鬆（≥-1%），正常（≥-3%）
-        const rsThreshold = highRiskMode ? 0.0 : (conservativeMode ? -1.0 : -3.0);
+        // ── 放寬門檻（目標：找20日潛力股）──
+        const vsrHardFilter = conservativeMode ? 1.2 : 0.8;
+        const rsThreshold = conservativeMode ? -1.0 : -3.0;
         const dim4EntryGate = 20; // 降低進入Dim4門檻（原本35 -> 25 -> 20）
 
-        const modeLabel = highRiskMode ? '高位嚴格' : (conservativeMode ? '低位保守' : '正常');
-        console.log(`[ShortTermV31] 大盤位階: ${(marketLevel * 100).toFixed(1)}% → 模式: ${modeLabel} (VSR門檻: ${vsrHardFilter}, RS門檻: ${rsThreshold}%)`);
+        console.log(`[ShortTermV31] 大盤位階: ${(marketLevel * 100).toFixed(1)}% → 模式: ${conservativeMode ? '保守' : '正常'} (VSR門檻: ${vsrHardFilter}, RS門檻: ${rsThreshold}%)`);
 
         // ── 2. 取得候選股票 ──
         let candidates: any[] = [];

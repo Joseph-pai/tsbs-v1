@@ -64,56 +64,8 @@ export function checkGapUp(
 }
 
 /**
- * 共用 VCP 波動率收縮條件判斷函式（統一標準）
- *
- * 標準：
- *   ATR 收縮：近 5 日 ATR < 近 20 日 ATR × 0.60
- *   量能收縮：近 5 日均量 < 近 20 日均量 × 0.70
- *
- * @param priorPrices  排除今日的歷史價格陣列（每筆需有 max, min, close）
- * @param priorVolumes 排除今日的歷史成交量陣列
- * @returns { isVcp, atrRatio, volRatio }
- */
-export function checkVcpCondition(
-    priorPrices: { max: number; min: number; close: number }[],
-    priorVolumes: number[]
-): { isVcp: boolean; atrRatio: number; volRatio: number } {
-    if (priorPrices.length < 20 || priorVolumes.length < 20) {
-        return { isVcp: false, atrRatio: 1, volRatio: 1 };
-    }
-
-    const getAtr = (slice: { max: number; min: number; close: number }[]) =>
-        slice.reduce((sum, p) => sum + (p.close > 0 ? (p.max - p.min) / p.close : 0), 0) / slice.length;
-
-    const recent5Atr  = getAtr(priorPrices.slice(-5));
-    const recent20Atr = getAtr(priorPrices.slice(-20));
-
-    const vol5Avg  = priorVolumes.slice(-5).reduce((a, b) => a + b, 0) / 5;
-    const vol20Avg = priorVolumes.slice(-20).reduce((a, b) => a + b, 0) / 20;
-
-    const atrRatio = recent20Atr > 0 ? recent5Atr / recent20Atr : 1;
-    const volRatio = vol20Avg   > 0 ? vol5Avg   / vol20Avg    : 1;
-
-    // 統一標準：ATR × 0.60、量能 × 0.70
-    const isVcp = atrRatio < 0.60 && volRatio < 0.70;
-
-    return { isVcp, atrRatio, volRatio };
-}
-
-/**
- * 判斷融資融券軋空動能（修正版）
- *
- * 軋空（Short Squeeze）的真實定義：
- *   空方（融券方）持倉壓力大，被迫回補，推升股價。
- *   核心信號 = 融券餘額下降（空方回補）+ 券資比高（空方壓力大）+ 股價同步上升
- *
- * 原邏輯錯誤：把「融資增加」當軋空信號。
- *   融資增加 = 多方加碼，與軋空無關。
- *
- * 修正後邏輯：
- *   1. 近 5 日融券餘額下降（空方被迫回補）
- *   2. 最新券資比 > 15%（空方壓力足夠大）
- *   3. 股價同步上升
+ * 判斷融資融券軋空動能
+ * 條件：近 5 日融資餘額穩定/溫和增加 && 股價同步上升 → 軋空信號
  */
 export function checkMarginSqueezeSignal(
     marginData: { date: string; MarginPurchaseTodayBalance: number; ShortSaleTodayBalance: number }[],
@@ -122,39 +74,23 @@ export function checkMarginSqueezeSignal(
     if (marginData.length < 5) return { hasSignal: false, marginTrend: 'stable', score: 0 };
 
     const recent5 = marginData.slice(-5);
-
-    // 融券餘額變化（用於判斷 marginTrend，保持原有輸出格式）
     const marginChanges: number[] = [];
     for (let i = 1; i < recent5.length; i++) {
         marginChanges.push(recent5[i].MarginPurchaseTodayBalance - recent5[i - 1].MarginPurchaseTodayBalance);
     }
-    const avgMarginChange = marginChanges.reduce((a, b) => a + b, 0) / marginChanges.length;
-    const marginTrend: 'increasing' | 'stable' | 'decreasing' =
-        avgMarginChange > 0 ? 'increasing' : (avgMarginChange === 0 ? 'stable' : 'decreasing');
 
-    // ── 修正核心：軋空信號改用融券餘額判斷 ──
+    const avgChange = marginChanges.reduce((a, b) => a + b, 0) / marginChanges.length;
+    const allNonNeg = marginChanges.every(c => c >= 0);
+    const marginTrend: 'increasing' | 'stable' | 'decreasing' = avgChange > 0 ? 'increasing' : (avgChange === 0 ? 'stable' : 'decreasing');
 
-    // 1. 最新與最舊融券餘額（判斷空方是否回補）
-    const shortFirst = recent5[0].ShortSaleTodayBalance;
-    const shortLast  = recent5[recent5.length - 1].ShortSaleTodayBalance;
-    const shortDecreasing = shortLast < shortFirst; // 融券餘額下降 = 空方回補
-
-    // 2. 券資比（最新日）：融券 / 融資，高代表空方壓力大
-    const latestMargin = recent5[recent5.length - 1].MarginPurchaseTodayBalance;
-    const shortRatio = latestMargin > 0 ? shortLast / latestMargin : 0;
-    const isHighShortRatio = shortRatio > 0.15; // 券資比 > 15% 視為空方壓力大
-
-    // 3. 股價同步上升
+    // 股價同步判斷
     const recentPrices = priceData.slice(-5);
     const priceUp = recentPrices.length >= 2 &&
         recentPrices[recentPrices.length - 1].close > recentPrices[0].close;
 
-    // 軋空信號：空方回補 + 空方壓力大 + 股價上升
-    const hasSignal = shortDecreasing && isHighShortRatio && priceUp;
-
-    // 分數：依融券下降幅度計算，最高 1
-    const shortDeclineRate = shortFirst > 0 ? (shortFirst - shortLast) / shortFirst : 0;
-    const score = hasSignal ? Math.min(1, shortDeclineRate * 5) : 0;
+    // 軋空信號：融資溫和增加 + 股價上升
+    const hasSignal = allNonNeg && avgChange > 0 && priceUp;
+    const score = hasSignal ? Math.min(1, avgChange / 500) : 0;
 
     return { hasSignal, marginTrend, score };
 }
@@ -336,14 +272,15 @@ export function evaluateStock(
             }
         }
 
-        // 2. VCP 波動率收縮 (Volatility Contraction)
-        // 統一標準：使用共用函式 checkVcpCondition（ATR×0.60、量能×0.70）
+        // 2. VCP 波動率收斂 (Volatility Contraction)
         let isVcpSqueeze = false;
-        if (history.length >= 21) {
-            const priorPricesForVcp = history.slice(0, -1); // 排除今日（突破日）
-            const priorVolsForVcp   = volumes.slice(0, -1);
-            const vcpResult = checkVcpCondition(priorPricesForVcp, priorVolsForVcp);
-            if (vcpResult.isVcp) {
+        if (history.length >= 20) {
+            const getAtr = (pSlice: any[]) => pSlice.reduce((sum, p) => sum + ((p.max - p.min) / p.close), 0) / pSlice.length;
+            const recent5Atr = getAtr(history.slice(-5));
+            const recent20Atr = getAtr(history.slice(-20));
+            const vol5Avg = volumes.slice(-5).reduce((a, b) => a + b, 0) / 5;
+            const vol20Avg = volumes.slice(-20).reduce((a, b) => a + b, 0) / 20;
+            if (recent5Atr < (recent20Atr * 0.5) && vol5Avg < vol20Avg) {
                 isVcpSqueeze = true;
                 finalPoints += 10; // 籌碼鎖定窒息量，爆發力加分
             }
