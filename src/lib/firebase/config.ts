@@ -20,7 +20,6 @@ const auth = getAuth(app);
 let db: Firestore;
 try {
   db = initializeFirestore(app, { 
-    experimentalForceLongPolling: true,
     localCache: typeof window !== "undefined" ? persistentLocalCache({ tabManager: persistentMultipleTabManager() }) : undefined
   });
 } catch (e) {
