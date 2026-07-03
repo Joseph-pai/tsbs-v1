@@ -10,10 +10,11 @@ export async function POST(req: Request) {
 
         // Stage 1: Discovery (量能激增+均線糾結)
         if (stage === 'discovery') {
-            const { results, timing } = await ScannerService.scanMarket(market as 'TWSE' | 'TPEX', settings);
+            const { results, meta, timing } = await ScannerService.scanMarket(market as 'TWSE' | 'TPEX', settings);
             return NextResponse.json({
                 success: true,
                 data: results,
+                meta,
                 timing,
                 count: results.length
             });
@@ -51,10 +52,11 @@ export async function POST(req: Request) {
 // Legacy GET support for backward compatibility
 export async function GET() {
     try {
-        const { results, timing } = await ScannerService.scanMarket();
+        const { results, meta, timing } = await ScannerService.scanMarket();
         return NextResponse.json({
             success: true,
             count: results.length,
+            meta,
             timing,
             data: results
         });

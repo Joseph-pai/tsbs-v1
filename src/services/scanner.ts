@@ -64,6 +64,92 @@ function normalizeMonthlyDate(dateStr: string): string {
     console.warn(`[normalizeMonthlyDate] Unrecognized monthly date format: ${dateStr}`);
     return s;
 }
+/**
+ * 共用函式：取得大盤位階模式
+ * 提取自 scanShortTerm，供 scanMarket 與 scanShortTerm 共同使用。
+ * @returns { marketLevel, marketMode, indexReturn20, taiexHistory, fallbackMode, indexFailedWarning }
+ */
+async function getMarketMode(): Promise<{
+    marketLevel: number;
+    marketMode: 'normal' | 'strict' | 'extreme';
+    indexReturn20: number;
+    taiexHistory: any[];
+    fallbackMode: boolean;
+    indexFailedWarning?: string;
+}> {
+    let marketLevel = 0.5;
+    let fallbackMode = false;
+    let indexFailedWarning: string | undefined;
+    let taiexHistory: any[] = [];
+
+    try {
+        const todayStr = format(new Date(), 'yyyy-MM-dd');
+        const redis = (await import('@/lib/redis')).redis;
+
+        const indexCacheKey = `tsbs:raw:index:TAIEX60:${todayStr}`;
+        try {
+            const cached = await redis.get(indexCacheKey);
+            if (cached) taiexHistory = JSON.parse(cached);
+        } catch (_) {}
+
+        if (taiexHistory.length < 10) {
+            const startDate = format(subDays(new Date(), 90), 'yyyy-MM-dd');
+            taiexHistory = await FinMindClient.getDailyStats({
+                stockId: 'TAIEX',
+                startDate,
+                endDate: todayStr
+            });
+            if (taiexHistory.length > 0) {
+                try { await redis.set(indexCacheKey, JSON.stringify(taiexHistory), 'EX', 14400); } catch (_) {}
+            }
+        }
+
+        if (taiexHistory.length >= 60) {
+            const recent60 = taiexHistory.slice(-60);
+            const closes60 = recent60.map((d: any) => d.close || d.Close || 0).filter((v: number) => v > 0);
+            if (closes60.length >= 10) {
+                const min60 = Math.min(...closes60);
+                const max60 = Math.max(...closes60);
+                const currentClose = closes60[closes60.length - 1];
+                marketLevel = max60 > min60 ? (currentClose - min60) / (max60 - min60) : 0.5;
+            }
+        } else if (taiexHistory.length >= 10) {
+            const closes = taiexHistory.slice(-Math.min(taiexHistory.length, 60)).map((d: any) => d.close || d.Close || 0).filter((v: number) => v > 0);
+            const min = Math.min(...closes);
+            const max = Math.max(...closes);
+            const current = closes[closes.length - 1];
+            marketLevel = max > min ? (current - min) / (max - min) : 0.5;
+        }
+    } catch (e: any) {
+        fallbackMode = true;
+        indexFailedWarning = '無法取得大盤資料，已切換至嚴格模式';
+        marketLevel = 0.65;
+        console.warn('[getMarketMode] 大盤資料獲取失敗，使用 fallback 嚴格模式:', e.message);
+    }
+
+    // 根據大盤位階決定模式
+    let marketMode: 'normal' | 'strict' | 'extreme';
+    if (marketLevel < 0.60) {
+        marketMode = 'normal';
+    } else if (marketLevel <= 0.80) {
+        marketMode = 'strict';
+    } else {
+        marketMode = 'extreme';
+    }
+
+    // 計算大盤 20 日漲幅（供 RS 計算）
+    let indexReturn20 = 0;
+    if (taiexHistory.length >= 20) {
+        const idx20 = taiexHistory.slice(-20);
+        const idxCloses = idx20.map((d: any) => d.close || d.Close || 0).filter((v: number) => v > 0);
+        if (idxCloses.length >= 2) {
+            indexReturn20 = (idxCloses[idxCloses.length - 1] - idxCloses[0]) / idxCloses[0];
+        }
+    }
+
+    return { marketLevel, marketMode, indexReturn20, taiexHistory, fallbackMode, indexFailedWarning };
+}
+
 export const ScannerService = {
     /**
      * Stage 1: Discovery (兩階段篩選 - 避免超時)
@@ -80,9 +166,32 @@ export const ScannerService = {
      * 
      * 寧缺毋濫：返回所有符合條件的股票（可能 0-15 支）
      */
-    scanMarket: async (market: 'TWSE' | 'TPEX' = 'TWSE', settings?: { volumeWeight?: number, maWeight?: number, breakoutWeight?: number, rsWeight?: number }): Promise<{ results: AnalysisResult[], timing: any }> => {
+    scanMarket: async (market: 'TWSE' | 'TPEX' = 'TWSE', settings?: { volumeWeight?: number, maWeight?: number, breakoutWeight?: number, rsWeight?: number }): Promise<{
+        results: AnalysisResult[];
+        meta: { marketMode: 'normal' | 'strict' | 'extreme'; marketLevel: number; fallbackMode: boolean; indexFailedWarning?: string };
+        timing: any;
+    }> => {
         const t0 = Date.now();
         console.log(`[Scanner] Stage 1: Discovery (${market}) - 兩階段篩選（快速預篩 + 嚴格驗證）...`);
+
+        // ── 大盤位階保護：取得市場模式 ─────────────────────────────
+        const { marketLevel, marketMode, fallbackMode, indexFailedWarning } = await getMarketMode();
+
+        // 根據市場模式動態設定門檻
+        let volThreshold: number;
+        let breakoutThreshold: number;
+        if (marketMode === 'normal') {
+            volThreshold = 2.5;
+            breakoutThreshold = 0.035;
+        } else if (marketMode === 'strict') {
+            volThreshold = 3.5;
+            breakoutThreshold = 0.05;
+        } else {
+            // extreme
+            volThreshold = 5.0;
+            breakoutThreshold = 0.05;
+        }
+        console.log(`[Scanner] 大盤位階: ${(marketLevel * 100).toFixed(1)}% → 模式: ${marketMode} (V門檻: ${volThreshold}x, 突破: ${(breakoutThreshold * 100).toFixed(1)}%)`);
 
         // Load industry mapping
         const industryMapping = await ExchangeClient.getIndustryMapping();
@@ -137,9 +246,8 @@ export const ScannerService = {
                         const volumes = history.map(s => s.Trading_Volume);
                         const vRatio = calculateVRatio(volumes);
 
-                        const volThreshold = 2.5; // 動能爆發基本門檻設定為至少 2.5倍
                         const squeezeThreshold = 0.04; // 均線糾結帶統一設定為 4%
-                        const breakoutThreshold = 0.035; // 突破幅度統一要求至少 3.5%
+                        // volThreshold 與 breakoutThreshold 已由大盤位階動態決定（見上方）
 
                         const maData = checkMaConstrict(ma5, ma20, squeezeThreshold);
                         const isBullish = ma5 > ma20;
@@ -149,9 +257,9 @@ export const ScannerService = {
 
                         const isBreakout = today.close > Math.max(ma5, ma20) && changePercent >= breakoutThreshold;
 
-                        // 三大信號共振（參考傳入設定或預設值）
+                        // 三大信號共振（使用動態門檻）
                         if (vRatio >= volThreshold && maData.isSqueezing && isBreakout && isBullish) {
-                            console.log(`[Scanner] ✓ Found: ${stock.stock_id} ${stock.stock_name} - V:${vRatio.toFixed(1)}x, MA:${(maData.constrictValue * 100).toFixed(1)}%, Break:${(changePercent * 100).toFixed(1)}%`);
+                            console.log(`[Scanner] ✓ Found: ${stock.stock_id} ${stock.stock_name} - V:${vRatio.toFixed(1)}x, MA:${(maData.constrictValue * 100).toFixed(1)}%, Break:${(changePercent * 100).toFixed(1)}% [${marketMode}]`);
 
                             const result: AnalysisResult = {
                                 stock_id: stock.stock_id,
@@ -166,7 +274,7 @@ export const ScannerService = {
                                 is_bullish: isBullish,
                                 consecutive_buy: 0,
                                 poc: today.close,
-                                verdict: '三大信號共振 - 爆發前兆',
+                                verdict: `三大信號共振 - 爆發前兆 [${marketMode === 'normal' ? '正常市場' : marketMode === 'strict' ? '嚴格市場' : '極嚴格市場'}]`,
                                 tags: ['DISCOVERY', 'VOLUME_EXPLOSION', 'MA_SQUEEZE', 'BREAKOUT'],
                                 dailyVolumeTrend: volumes.slice(-10),
                                 maConstrictValue: maData.constrictValue,
@@ -210,10 +318,22 @@ export const ScannerService = {
         console.log(`[Scanner] 總耗時: ${t3 - t0}ms (預篩: ${t2 - t1}ms, 深度: ${t3 - t2}ms)`);
 
         // 按量能倍數排序
-        const sorted = candidates.sort((a, b) => b.v_ratio - a.v_ratio);
+        let sorted = candidates.sort((a, b) => b.v_ratio - a.v_ratio);
+
+        // ── extreme 模式：截斷前 15 名（高位市場嚴格品質管控）──
+        if (marketMode === 'extreme' && sorted.length > 15) {
+            console.log(`[Scanner] extreme 模式：結果從 ${sorted.length} 截斷至前 15 名`);
+            sorted = sorted.slice(0, 15);
+        }
 
         return {
             results: sorted,
+            meta: {
+                marketMode,
+                marketLevel,
+                fallbackMode,
+                ...(indexFailedWarning ? { indexFailedWarning } : {})
+            },
             timing: {
                 snapshot: t1 - t0,
                 preFilter: t2 - t1,
