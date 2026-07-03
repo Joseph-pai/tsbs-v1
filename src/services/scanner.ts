@@ -1,7 +1,7 @@
 import { FinMindClient, } from '@/lib/finmind';
 import { FinMindExtras } from '@/lib/finmind';
 import { ExchangeClient, normalizeAnyDate } from '@/lib/exchange';
-import { evaluateStock, calculateVRatio, checkMaConstrict, checkVolumeIncreasing, checkGapUp, checkMarginSqueezeSignal } from './engine';
+import { evaluateStock, calculateVRatio, checkMaConstrict, checkVolumeIncreasing, checkGapUp, checkMarginSqueezeSignal, checkVcpCondition } from './engine';
 import { AnalysisResult, StockData } from '@/types';
 import { format, subDays } from 'date-fns';
 import { calculateSMA } from './indicators';
@@ -538,22 +538,16 @@ export const ScannerService = {
                         if (!isBullishCandle) return null;
                         if (body > 0 && upperShadow > body * 0.5) return null;
 
-                        // ── 策略三：VCP 波動率收縮（四條件全滿足）──────────
-                        const getAtr = (slice: any[]) =>
-                            slice.reduce((sum, p) => sum + (p.max > 0 && p.close > 0 ? (p.max - p.min) / p.close : 0), 0) / slice.length;
+                        // ── 策略三：VCP 波動率收縮（統一標準：ATR×0.60、量能×0.70）──────────
+                        // 使用共用函式 checkVcpCondition（排除今日的 priorPrices/priorVolumes）
 
-                        // 同樣使用排除今日的 priorPrices 計算突破前的收縮情形
-                        const recent5Atr = priorPrices.length >= 5 ? getAtr(priorPrices.slice(-5)) : 999;
-                        const recent20Atr = priorPrices.length >= 20 ? getAtr(priorPrices.slice(-20)) : 999;
-                        const priorVol5Avg = priorVolumes.length >= 5 ? priorVolumes.slice(-5).reduce((a: number, b: number) => a + b, 0) / 5 : 0;
-
-                        // VCP 條件 1：突破前 5 日 ATR < 突破前 20 日 ATR × 60%
-                        if (recent5Atr >= recent20Atr * 0.60) return null;
-                        // VCP 條件 2：突破前 5 日均量 < 突破前 20 日均量 × 70%
-                        if (priorVol5Avg >= priorVol20Avg * 0.70) return null;
-                        // VCP 條件 3（修正版）：移除重複的爆量門檻，已由策略六統一負責
-                        // 原條件：todayVol > priorVol20Avg × 2.5 與策略六的 45日均量 × volThreshold 衝突
-                        // VCP 此處只驗證「收縮型態」，突破爆量驗證由策略六的 priorVol45Avg × volThreshold 負責
+                        // VCP 條件：使用共用函式 checkVcpCondition（統一標準：ATR×0.60、量能×0.70）
+                        const vcpCheck = checkVcpCondition(
+                            priorPrices as { max: number; min: number; close: number }[],
+                            priorVolumes
+                        );
+                        if (!vcpCheck.isVcp) return null;
+                        // 突破爆量驗證由策略六的 priorVol45Avg × volThreshold 負責（不在此重複）
 
                         // ── 策略四（修正版）：RS 相對強度硬性排除（10 日改為 20 日）────
                         // 修正：10 日過短，單日波動易誤判；20 日更能反映「大盤修正時個股韌性」
@@ -582,8 +576,8 @@ export const ScannerService = {
                         // 量能評分
                         const volumeScore = vRatio >= volThreshold * 1.5 ? 40 : vRatio >= volThreshold ? 25 : 0;
 
-                        // VCP 收縮程度評分
-                        const vcpScore = recent20Atr > 0 ? Math.max(0, 10 - (recent5Atr / recent20Atr) * 10) : 0;
+                        // VCP 收縮程度評分（使用 vcpCheck.atrRatio = recent5Atr / recent20Atr）
+                        const vcpScore = vcpCheck.atrRatio < 1 ? Math.max(0, 10 - vcpCheck.atrRatio * 10) : 0;
 
                         const totalScore = volumeScore + breakoutScore + positionBonus + vcpScore + rsBonus;
 
@@ -1080,12 +1074,19 @@ export const ScannerService = {
             console.warn('[ShortTermV31] TAIEX fetch failed, defaulting to normal mode');
         }
 
-        // ── 放寬門檻（目標：找20日潛力股）──
-        const vsrHardFilter = conservativeMode ? 1.2 : 0.8;
-        const rsThreshold = conservativeMode ? -1.0 : -3.0;
+        // ── 項目2修正：高位嚴格模式（marketLevel > 80% 時門檻最嚴格）──
+        // 原邏輯：低位才保守，高位反而門檻最低 → 邏輯完全反向
+        // 修正後：高位 > 80% 啟用 highRiskMode，門檻高於保守模式
+        const highRiskMode = marketLevel > 0.80;
+
+        // VSR 硬性門檻：高位 > 低位 > 正常
+        const vsrHardFilter = highRiskMode ? 1.8 : (conservativeMode ? 1.2 : 0.8);
+        // RS 門檻：高位只接受正 RS（≥0%），低位寬鬆（≥-1%），正常（≥-3%）
+        const rsThreshold = highRiskMode ? 0.0 : (conservativeMode ? -1.0 : -3.0);
         const dim4EntryGate = 20; // 降低進入Dim4門檻（原本35 -> 25 -> 20）
 
-        console.log(`[ShortTermV31] 大盤位階: ${(marketLevel * 100).toFixed(1)}% → 模式: ${conservativeMode ? '保守' : '正常'} (VSR門檻: ${vsrHardFilter}, RS門檻: ${rsThreshold}%)`);
+        const modeLabel = highRiskMode ? '高位嚴格' : (conservativeMode ? '低位保守' : '正常');
+        console.log(`[ShortTermV31] 大盤位階: ${(marketLevel * 100).toFixed(1)}% → 模式: ${modeLabel} (VSR門檻: ${vsrHardFilter}, RS門檻: ${rsThreshold}%)`);
 
         // ── 2. 取得候選股票 ──
         let candidates: any[] = [];
