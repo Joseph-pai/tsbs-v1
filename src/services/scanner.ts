@@ -348,29 +348,79 @@ export const ScannerService = {
 
     /**
      * Stage 2: Filtering (投信連買 + 法人同步 + 量能遞增)
+     * 項目5改進：
+     * - 加入 RS 硬性排除（個股 20 日漲幅 < 大盤 - 2% → 直接排除）
+     * - 評分門檻提升：normal > 0.55、strict/extreme > 0.65
+     * - 移除 passCount >= 2 兜底（防止弱勢股靠法人連買過關）
+     * - 每支結果帶出 hardFilterReasons
      */
-    filterStocks: async (stockIds: string[], settings?: { volumeWeight?: number, maWeight?: number, breakoutWeight?: number, rsWeight?: number }): Promise<{ results: AnalysisResult[], timing: any }> => {
+    filterStocks: async (stockIds: string[], settings?: { volumeWeight?: number, maWeight?: number, breakoutWeight?: number, rsWeight?: number }): Promise<{
+        results: AnalysisResult[];
+        meta: { marketMode: 'normal' | 'strict' | 'extreme'; marketLevel: number; scoreThreshold: number };
+        timing: any;
+    }> => {
         const t0 = Date.now();
         console.log(`[Scanner] Stage 2: Filtering - 深度篩選 ${stockIds.length} 支股票...`);
 
+        // ── 取得大盤位階模式（共用函式）──────────────────────────
+        const { marketMode, marketLevel, indexReturn20 } = await getMarketMode();
+
+        // 根據市場模式決定評分門檻
+        const scoreThreshold = (marketMode === 'strict' || marketMode === 'extreme') ? 0.65 : 0.55;
+        console.log(`[Scanner] 市場模式: ${marketMode}，評分門檻: ${scoreThreshold}，大盤20日漲幅: ${(indexReturn20 * 100).toFixed(2)}%`);
+
         const filtered: AnalysisResult[] = [];
+        let rsRejected = 0;
+        let scoreFailed = 0;
 
         for (const stockId of stockIds) {
             try {
                 const result = await ScannerService.analyzeStock(stockId, settings);
                 if (!result) continue;
 
-                // Stage 2 篩選條件
+                const hardFilterReasons: string[] = [];
+
+                // ── RS 硬性排除：個股 20 日漲幅 < 大盤 20 日漲幅 - 2% ──
+                // 從 comprehensiveScoreDetails 或重新從 result 取得個股漲幅
+                // 使用 change_percent 是今日漲幅，需用 20 日漲幅來和大盤比較
+                // analyzeStock 不回傳 20 日 RS，此處用近期績效代替：
+                // 若 score < 0.3 且 change_percent < indexReturn20 - 0.02 視為相對弱勢
+                // 更精確的 RS 以 history 計算
+                if (result.history && result.history.length >= 20) {
+                    const hist = result.history;
+                    const closes = hist.map(h => h.close);
+                    const stock20 = closes.slice(-20);
+                    const stockReturn20 = stock20[0] > 0 ? (stock20[stock20.length - 1] - stock20[0]) / stock20[0] : 0;
+
+                    if (indexReturn20 !== 0 && stockReturn20 < indexReturn20 - 0.02) {
+                        hardFilterReasons.push(`RS偏弱：個股20日漲幅 ${(stockReturn20 * 100).toFixed(1)}% < 大盤 ${(indexReturn20 * 100).toFixed(1)}% - 2%`);
+                        console.log(`[Scanner] RS排除 ${stockId}：個股${(stockReturn20 * 100).toFixed(1)}% vs 大盤${(indexReturn20 * 100).toFixed(1)}%`);
+                        rsRejected++;
+                        continue; // 直接排除，不進入評分
+                    }
+                }
+
+                // ── 評分門檻（依市場模式動態調整）──────────────────
+                // 移除舊的 passCount >= 2 兜底，改為純評分門檻
                 const hasInstBuying = result.consecutive_buy >= 3;
                 const hasVolumeIncreasing = result.volumeIncreasing === true;
                 const isAboveMA = result.is_ma_breakout;
 
-                // 綜合評分 > 0.4 或滿足任意兩個條件
-                const passCount = [hasInstBuying, hasVolumeIncreasing, isAboveMA].filter(Boolean).length;
-
-                if (result.score > 0.4 || passCount >= 2) {
-                    filtered.push(result);
+                if (result.score <= scoreThreshold) {
+                    // 分數不足時記錄原因（但不輸出到結果）
+                    const passCount = [hasInstBuying, hasVolumeIncreasing, isAboveMA].filter(Boolean).length;
+                    if (passCount < 3) {
+                        scoreFailed++;
+                        continue;
+                    }
+                    // 三個條件全過才允許低分通過（取代舊的 passCount >= 2）
                 }
+
+                // 通過篩選，帶出 hardFilterReasons（此時為空，代表完全通過）
+                filtered.push({
+                    ...result,
+                    hardFilterReasons: hardFilterReasons.length > 0 ? hardFilterReasons : undefined
+                });
             } catch (error) {
                 console.warn(`[Scanner] Error filtering ${stockId}:`, error);
             }
@@ -382,10 +432,11 @@ export const ScannerService = {
             .slice(0, 30);
 
         const t1 = Date.now();
-        console.log(`[Scanner] Stage 2 完成：篩選出 ${top30.length} 支強勢股`);
+        console.log(`[Scanner] Stage 2 完成：篩選出 ${top30.length} 支強勢股（RS排除: ${rsRejected}，分數不足: ${scoreFailed}）`);
 
         return {
             results: top30,
+            meta: { marketMode, marketLevel, scoreThreshold },
             timing: { total: t1 - t0 }
         };
     },

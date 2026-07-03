@@ -22,10 +22,11 @@ export async function POST(req: Request) {
 
         // Stage 2: Filtering (投信連買+技術確認)
         if (stage === 'filter' && Array.isArray(stockIds)) {
-            const { results, timing } = await ScannerService.filterStocks(stockIds, settings);
+            const { results, meta, timing } = await ScannerService.filterStocks(stockIds, settings);
             return NextResponse.json({
                 success: true,
                 data: results,
+                meta,
                 timing,
                 count: results.length
             });

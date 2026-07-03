@@ -94,6 +94,7 @@ export interface AnalysisResult {
     win_rate_score?: number;     // 勝率分數 (0-100)
     explosive_score?: number;    // 爆發力分數 (0-100+)
     whyBullish?: string;
+    hardFilterReasons?: string[];  // 被硬性規則排除的原因清單（RS/VCP/位階）
 }
 
 export interface StockCandle {
