@@ -9,9 +9,18 @@ export interface BacktestRunnerResult {
     processedStocksCount: number;
 }
 
+/** API 請求之間的等待 (ms)，避免 FinMind rate limiting */
+function sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 /**
  * 回測執行器 (Backtest Runner)
  * 可對單支或多支股票進行完整 5D10% 歷史回測
+ *
+ * 資料來源優先順序：
+ *   1. FinMind API (Primary) - 支援 2-3 年歷史
+ *   2. TWSE/TPEX ExchangeClient (Fallback) - 約 6 個月
  */
 export async function runMarketBacktest(
     stockIds: string[],
@@ -19,12 +28,21 @@ export async function runMarketBacktest(
         months?: number;
         scoreThreshold?: number;
         enhanced?: boolean;
+        requestDelayMs?: number;  // 每個股票請求之間的延遲 (預設 600ms)
     }
 ): Promise<BacktestRunnerResult> {
     const store = new PredictionLedgerStore();
     let processedCount = 0;
+    const delayMs = options?.requestDelayMs ?? 600;
 
-    for (const stockId of stockIds) {
+    for (let i = 0; i < stockIds.length; i++) {
+        const stockId = stockIds[i];
+
+        // 每個股票之間加入延遲，避免 FinMind API rate limiting
+        if (i > 0) {
+            await sleep(delayMs);
+        }
+
         try {
             const normalizedRes = await fetchAndNormalizeStockHistory(stockId, {
                 months: options?.months ?? 6,

@@ -145,10 +145,14 @@ export function evaluateStock(
     // 要求 5, 20, 60 發散或穩定多頭：收盤 > 5MA > 20MA > 60MA
     const isMaAligned = today.close > ma5 && ma5 > ma20 && ma20 >= ma60;
     const maData = checkMaConstrict(ma5, ma20, 0.04); // 均線糾結放寬至 4%
-    // 分數：多頭排列給滿分，否則有糾結給一半
+    // [OPT-Round2] 移除 squeezing 部分加分
+    // Evidence: Backtest n=232, Squeezing hit rate 23.26% vs Unconstricted 43.92% (-20.66pp)
+    // 均線糾結代表整理尚未完成，給予部分加分反而降低訊號品質
+    // Old: if (isMaAligned) maScore = maWeight; else if (maData.isSqueezing && today.close > ma20) maScore = maWeight * 0.5;
     let maScore = 0;
     if (isMaAligned) maScore = maWeight;
-    else if (maData.isSqueezing && today.close > ma20) maScore = maWeight * 0.5;
+    // Squeezing-only (not aligned) stocks: maScore remains 0 (removed 7.5pt partial credit)
+
 
     // --- 3. Breakout Resonance (延續性動能與 60 日突破) ---
     // 找 60 天高點

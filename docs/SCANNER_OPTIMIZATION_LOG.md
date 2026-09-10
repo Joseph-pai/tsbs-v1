@@ -189,3 +189,76 @@
 | Signal Reduction Risk | YES / NO |
 | 結論 | 保留 / 恢復原設定 |
 ```
+
+---
+
+## 第 2 輪 (Round 2) — 2026-09-11
+
+### 重大里程碑：FinMind API 整合
+
+- `src/backtest/historicalData.ts`：改用 FinMind TaiwanStockPrice 為 Primary 資料源
+- `src/backtest/backtestRunner.ts`：加入 600ms 請求間距（防 rate limiting）
+- 效果：n=19 → **n=232**，40/40 股票全部成功取得 290 bars（2025-07 ~ 2026-09）
+
+### 📊 Baseline（Pre-optimization，FinMind 資料，n=232）
+
+| 指標 | 數值 |
+|---|---|
+| 測試期間 | 2025-09-30 ~ 2026-05-13 |
+| Stock Universe | 40 支（全部成功） |
+| 有效樣本數 | **232** |
+| 5D +10% 命中率 | **40.09%** |
+| 平均最大報酬 | 10.36% |
+| 中位數最大報酬 | 7.57% |
+| 平均達標天數 | 2.81 天 |
+
+### 📊 因子分析（首次具備統計意義）
+
+| Factor | Bucket | n | Hit Rate | 差距 | 統計評估 |
+|---|---|:---:|:---:|:---:|---|
+| **Breakout** | True | 219 | 41.55% | **+26.17pp** | ✅ 強 evidence |
+| **Breakout** | False | 13 | 15.38% | — | (n=13 仍稍小) |
+| **MA Alignment** | Aligned | 204 | 42.16% | **+17.16pp** | ✅ 有 evidence |
+| **MA Alignment** | Not Aligned | 28 | 25.00% | — | — |
+| **MA Constriction** | ≥4% Unconstricted | 189 | 43.92% | **+20.66pp** | ✅ 強 evidence |
+| **MA Constriction** | <4% Squeezing | 43 | 23.26% | — | ❌ 低於預期 |
+| RS (score proxy) | Strong | 109 | 38.53% | 2.93pp | ⚠️ 無顯著差異 |
+
+### ✏️ 第一輪 Factor 修改：MA Constriction（均線糾結加分移除）
+
+| 項目 | 內容 |
+|---|---|
+| **Factor** | MA Constriction (均線糾結帶) |
+| **修改項目** | 移除 squeezing-only 股票的部分加分（7.5 pts） |
+| **舊設定** | `else if (maData.isSqueezing && close > ma20) maScore = maWeight * 0.5` |
+| **新設定** | 移除此行，squeezing-only 股票 maScore = 0 |
+| **修改依據** | n=43 squeezing → 23.26% hit rate vs n=189 unconstricted → 43.92% hit rate，差距 20.66pp |
+| **修改檔案** | `src/services/engine.ts` L144-152 |
+
+### 📊 Before vs After 比較
+
+| 指標 | Before | After | Delta | 評估 |
+|---|:---:|:---:|:---:|---|
+| **Signal Count** | 232 | 227 | -5 (-2.16%) | ✅ 極小減少 |
+| **5D Hit Rate** | 40.09% | **40.97%** | **+0.88pp** | ✅ 改善 |
+| **Avg Max Return** | 10.36% | **10.48%** | **+0.12pp** | ✅ 改善 |
+| **Median Max Return** | 7.57% | **7.93%** | **+0.36pp** | ✅ 改善 |
+| **Avg Days to Target** | 2.81 天 | 2.81 天 | ±0 | — |
+| **Signal Reduction Risk** | — | — | NO | ✅ 安全 |
+
+### 決策記錄（Round 2）
+
+| 項目 | 內容 |
+|---|---|
+| **決策** | ✅ **保留** — 所有指標方向正確，Signal Reduction 極小 |
+| **備註** | 改善幅度較小（+0.88pp），因為 5 個被過濾的訊號原本依靠其他因子（Volume/Breakout）補足分數，而非純靠 squeezing 加分 |
+| **下一輪** | 可繼續測試其他因子（Breakout 或 MA Alignment 相關） |
+
+---
+
+### 下一輪觸發條件（已全部滿足 ✅）
+
+- [x] 整體 valid sample ≥ 100 （n=227）
+- [x] MA Constriction bucket 分析每個 bucket ≥ 30 樣本（43 vs 189）
+- [x] Factor differentiation 跨 bucket 差距 ≥ 10pp 且具有統計意義（20.66pp）
+

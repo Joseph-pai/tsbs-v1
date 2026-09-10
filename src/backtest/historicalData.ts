@@ -133,14 +133,61 @@ export function normalizeHistoricalBars(
 }
 
 /**
- * 整合現有 ExchangeClient 取得股票歷史資料並進行正規化 (Backtest Adapter)
- * 重用現有 getStockHistory 邏輯
+ * 整合 FinMind API 取得股票歷史資料並進行正規化 (Backtest Adapter)
+ *
+ * 策略：
+ *   Primary  → FinMind TaiwanStockPrice (支援 2-3 年歷史，日 K OHLCV)
+ *   Fallback → ExchangeClient.getStockHistory (TWSE/TPEX，僅 6 個月)
+ *
+ * FinMind TaiwanStockPrice 回傳欄位：
+ *   date, stock_id, Trading_Volume, open, max, min, close, spread, Trading_money
+ *
+ * 這些欄位直接對應 normalizeHistoricalBars 支援的 raw 格式。
  */
 export async function fetchAndNormalizeStockHistory(
     stockId: string,
     options?: { months?: number; minRequiredBars?: number }
 ): Promise<NormalizationResult> {
     const months = options?.months ?? 6;
+    const minRequiredBars = options?.minRequiredBars ?? 20;
+
+    // === 1. 計算日期範圍 ===
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setMonth(startDate.getMonth() - months);
+    // FinMind 需要額外 60 天的歷史資料供 MA60/VRatio 計算使用
+    startDate.setDate(startDate.getDate() - 65);
+
+    const startDateStr = startDate.toISOString().split('T')[0];
+    const endDateStr = endDate.toISOString().split('T')[0];
+
+    // === 2. 嘗試使用 FinMind API (Primary) ===
+    try {
+        const { FinMindClient } = await import('@/lib/finmind');
+        const rawData = await FinMindClient.getDailyStats({
+            stockId,
+            startDate: startDateStr,
+            endDate: endDateStr,
+        });
+
+        if (rawData && rawData.length >= minRequiredBars) {
+            console.log(`[FinMind] ${stockId}: ${rawData.length} bars (${startDateStr} ~ ${endDateStr})`);
+            return normalizeHistoricalBars(rawData, { minRequiredBars });
+        }
+
+        // FinMind 回傳資料不足，fallback
+        console.warn(`[FinMind] ${stockId}: 資料不足 (${rawData?.length ?? 0} bars)，改用 TWSE/TPEX`);
+    } catch (err: any) {
+        // FINMIND_TIER_RESTRICTION 代表 API 等級限制，直接 fallback
+        if (err?.message?.includes('FINMIND_TIER_RESTRICTION')) {
+            console.warn(`[FinMind] ${stockId}: API 等級限制，改用 TWSE/TPEX`);
+        } else {
+            console.warn(`[FinMind] ${stockId}: 取得失敗 (${err?.message ?? err})，改用 TWSE/TPEX`);
+        }
+    }
+
+    // === 3. Fallback: TWSE/TPEX ExchangeClient ===
     const rawHistory = await ExchangeClient.getStockHistory(stockId, months);
-    return normalizeHistoricalBars(rawHistory, options);
+    return normalizeHistoricalBars(rawHistory, { minRequiredBars });
 }
+
