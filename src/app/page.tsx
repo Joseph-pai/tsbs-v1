@@ -1235,34 +1235,50 @@ export default function DashboardPage() {
       <div className="bg-slate-900 border-2 border-slate-800 rounded-[3rem] p-10 mb-12 shadow-2xl space-y-8">
         
         {/* 全市場最新數據預載專區 (控制中心核心區) */}
-        <div className="flex flex-col sm:flex-row items-center justify-between p-5 rounded-2xl bg-gradient-to-r from-cyan-950/60 via-slate-850 to-slate-900 border-2 border-cyan-500/40 shadow-xl gap-4">
-          <div className="flex items-center gap-3.5">
-            <div className="p-3.5 rounded-xl bg-cyan-500/20 border border-cyan-500/40 text-cyan-300 shadow-md">
-              <RefreshCw className={`w-7 h-7 ${isSyncing ? 'animate-spin' : ''}`} />
-            </div>
-            <div>
-              <div className="text-white font-black text-xl flex items-center gap-2">
-                全市場數據預載庫
-                {syncStatus.hasData && (
-                  <span className="px-2.5 py-0.5 rounded-full text-xs bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-mono font-bold">
-                    已載入 {syncStatus.totalStocks} 檔股票
-                  </span>
+        <div className="p-5 rounded-2xl bg-gradient-to-r from-cyan-950/60 via-slate-900 to-slate-900 border-2 border-cyan-500/40 shadow-xl">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+
+            {/* 左側：圖示 + 資訊 */}
+            <div className="flex items-center gap-4 min-w-0">
+              <div className="flex-shrink-0 p-3 rounded-xl bg-cyan-500/20 border border-cyan-500/40 text-cyan-300 shadow-md">
+                <RefreshCw className={`w-6 h-6 ${isSyncing ? 'animate-spin' : ''}`} />
+              </div>
+              <div className="space-y-1 min-w-0">
+                {/* 標題 + 已載入徽章 */}
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-white font-black text-lg leading-tight">全市場數據預載庫</span>
+                  {syncStatus.hasData && (
+                    <span className="px-2 py-0.5 rounded-full text-xs bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-mono font-bold whitespace-nowrap">
+                      已載入 {syncStatus.totalStocks} 檔股票
+                    </span>
+                  )}
+                </div>
+                {/* 最新數據時間 */}
+                <div className="text-xs text-cyan-300/80 font-mono">
+                  {syncStatus.lastSyncTime
+                    ? `📅 最新數據時間：${syncStatus.lastSyncTime}`
+                    : '⚠️ 尚未下載，點擊右側按鈕預載享極速掃描'}
+                </div>
+                {/* 下載進度訊息（只在下載中顯示） */}
+                {isSyncing && syncMessage && (
+                  <div className="text-xs text-cyan-400 font-mono font-bold animate-pulse">
+                    {syncMessage}
+                  </div>
                 )}
               </div>
-              <div className="text-sm text-cyan-300/90 font-mono mt-1 font-bold">
-                {syncStatus.lastSyncTime ? `📅 最新數據時間：${syncStatus.lastSyncTime}` : '⚠️ 尚未下載內部數據 (點擊右側按鈕預載享 1 秒極速掃描)'}
-              </div>
             </div>
-          </div>
 
-          <button
-            onClick={handleDownloadLatestData}
-            disabled={isSyncing}
-            className="w-full sm:w-auto px-6 py-3.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-black text-base transition-all shadow-lg shadow-cyan-500/30 flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer whitespace-nowrap"
-          >
-            <RefreshCw className={`w-5 h-5 ${isSyncing ? 'animate-spin' : ''}`} />
-            {isSyncing ? (syncMessage || '正在下載數據...') : '下載最新股票數據'}
-          </button>
+            {/* 右側：下載按鈕 */}
+            <button
+              onClick={handleDownloadLatestData}
+              disabled={isSyncing}
+              className="w-full sm:w-auto flex-shrink-0 px-5 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-black text-sm transition-all shadow-lg shadow-cyan-500/30 flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer whitespace-nowrap"
+            >
+              <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
+              {isSyncing ? '下載中...' : '下載最新股票數據'}
+            </button>
+
+          </div>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
           <div className="space-y-4">
