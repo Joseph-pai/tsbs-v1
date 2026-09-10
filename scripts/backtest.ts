@@ -3,6 +3,7 @@ import path from 'path';
 import { runMarketBacktest } from '../src/backtest/backtestRunner';
 import { generateTextReport, generateJSONReport, generateCSVReport } from '../src/backtest/report';
 import { analyzeFactors, generateFactorAnalysisMarkdown } from '../src/backtest/factorAnalysis';
+import { runEventAlphaABBacktest, generateEventAlphaBacktestMarkdown } from '../src/backtest/eventAlphaBacktest';
 
 async function main() {
     console.log('==========================================================');
@@ -49,6 +50,18 @@ async function main() {
     const factorAnalysisResult = analyzeFactors(result.ledgerItems);
     const factorMdReport = generateFactorAnalysisMarkdown(factorAnalysisResult);
 
+    // 進行 Event Alpha A/B Backtest
+    // Control 組: 所有 Technical Scanner 訊號 (不過濾)
+    // Treatment 組: 同一組訊號 (在 runEventAlphaABBacktest 內部依 Event 進行過濾)
+    // eventItems: 目前無真實事件資料，使用空陣列 (正確實證行為，結論將為暫無證據支持)
+    console.log('[Backtest] 正在執行 Event Alpha A/B Backtest (Future Leakage Guard 已啟用)...');
+    const abResult = runEventAlphaABBacktest({
+        controlLedger: result.ledgerItems,
+        treatmentLedger: result.ledgerItems,
+        eventItems: [], // 真實 Event 資料來源由 Scrapling Service 提供，目前為空陣列
+    });
+    const abMdReport = generateEventAlphaBacktestMarkdown(abResult);
+
     // 建立輸出目錄 backtest-results/
     const outputDir = path.join(process.cwd(), 'backtest-results');
     if (!fs.existsSync(outputDir)) {
@@ -65,12 +78,16 @@ async function main() {
     const csvPath = path.join(outputDir, 'ledger.csv');
     const factorJsonPath = path.join(outputDir, 'factor-analysis.json');
     const factorMdPath = path.join(docsDir, 'FACTOR_ANALYSIS.md');
+    const abJsonPath = path.join(outputDir, 'event-alpha-ab-backtest.json');
+    const abMdPath = path.join(docsDir, 'EVENT_ALPHA_BACKTEST.md');
 
     fs.writeFileSync(txtPath, textReport, 'utf-8');
     fs.writeFileSync(jsonPath, jsonReport, 'utf-8');
     fs.writeFileSync(csvPath, csvReport, 'utf-8');
     fs.writeFileSync(factorJsonPath, JSON.stringify(factorAnalysisResult, null, 2), 'utf-8');
     fs.writeFileSync(factorMdPath, factorMdReport, 'utf-8');
+    fs.writeFileSync(abJsonPath, JSON.stringify(abResult, null, 2), 'utf-8');
+    fs.writeFileSync(abMdPath, abMdReport, 'utf-8');
 
     console.log('\n' + textReport + '\n');
     console.log('==========================================================');
@@ -80,6 +97,9 @@ async function main() {
     console.log(` - CSV  明細: ${csvPath}`);
     console.log(` - Factor JSON: ${factorJsonPath}`);
     console.log(` - Factor Markdown: ${factorMdPath}`);
+    console.log(` - Event Alpha A/B JSON: ${abJsonPath}`);
+    console.log(` - Event Alpha A/B Markdown: ${abMdPath}`);
+    console.log(`[A/B Result] 結論: ${abResult.conclusion}`);
     console.log('==========================================================');
 }
 
