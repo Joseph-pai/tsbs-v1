@@ -88,7 +88,7 @@ export function normalizeHistoricalBars(
         const close = parseNumeric(raw.close ?? raw.Close ?? raw.ClosingPrice);
         const volume = parseNumeric(raw.Trading_Volume ?? raw.volume ?? raw.Volume ?? raw.TradeVolume ?? raw.TradeQty ?? raw.TradingShares, true);
 
-        // 檢查是否有必填 OHLCV 數值無效
+        // 檢查是否有必填 OHLCV 數值無效 (不補 0、不自建不存在數值)
         if (isNaN(open) || isNaN(high) || isNaN(low) || isNaN(close) || isNaN(volume)) {
             invalidCount++;
             continue;
