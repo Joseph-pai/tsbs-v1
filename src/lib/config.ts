@@ -1,7 +1,7 @@
 export const CONFIG = {
     FINMIND: {
         API_URL: 'https://api.finmindtrade.com/api/v4/data',
-        TOKEN: process.env.NEXT_PUBLIC_FINMIND_TOKEN || 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ1c2VyX2lkIjoiam9zZXBocGFpIiwiZW1haWwiOiJhMTg5MTEyODkxMjJAZ21haWwuY29tIiwidG9rZW5fdmVyc2lvbiI6MH0.qAmCuuJ9oqtjr1rSu2P7wsRe5FkRYgZY8yzSyv1Z9QY',
+        TOKEN: process.env.FINMIND_TOKEN || '',
     },
     SYSTEM: {
         V_RATIO_THRESHOLD: 3.5,     // 提高至 3.5
