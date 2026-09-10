@@ -516,11 +516,6 @@ export default function DashboardPage() {
         })
       });
 
-      if (!batchRes.ok) {
-        const text = await batchRes.text().catch(() => '');
-        throw new Error(`分析請求失敗 (HTTP ${batchRes.status}): ${text.slice(0, 100)}`);
-      }
-
       const batchJson = await batchRes.json();
       if (!batchJson.success) throw new Error(batchJson.error || '分析失敗');
 
@@ -609,7 +604,9 @@ export default function DashboardPage() {
         })
         .slice(0, 200); // Reduce ceiling to 200 for 3x faster scan
 
-      const BATCH_SIZE = 5; // 降低批次為 5 支，避開 Netlify 10 秒 API 逾時限制 (504/502)
+      // Phase 3: Batched Resonance Analysis
+      setStage('analyzing');
+      const BATCH_SIZE = 25; // Increase batch size for better throughput
       const allResults: AnalysisResult[] = [];
 
       for (let i = 0; i < candidates.length; i += BATCH_SIZE) {
@@ -628,11 +625,6 @@ export default function DashboardPage() {
             settings: settings
           })
         });
-
-        if (!batchRes.ok) {
-          console.warn(`[Analyze Batch] HTTP ${batchRes.status} on batch ${Math.floor(i / BATCH_SIZE) + 1}`);
-          continue;
-        }
 
         const batchJson = await batchRes.json();
         if (batchJson.success && batchJson.data) {
@@ -763,7 +755,7 @@ export default function DashboardPage() {
 
       setEnhancedProgress({ current: 0, total: candidates.length, phase: '強化指標深度分析中...' });
 
-      const BATCH_SIZE = 5;
+      const BATCH_SIZE = 25;
       const allEnhancedResults: AnalysisResult[] = [];
 
       for (let i = 0; i < candidates.length; i += BATCH_SIZE) {
@@ -783,11 +775,6 @@ export default function DashboardPage() {
             enhanced: true  // 啟用強化評分模式
           })
         });
-
-        if (!batchRes.ok) {
-          console.warn(`[Enhanced Batch] HTTP ${batchRes.status} on batch ${Math.floor(i / BATCH_SIZE) + 1}`);
-          continue;
-        }
 
         const batchJson = await batchRes.json();
         if (batchJson.success && batchJson.data) {

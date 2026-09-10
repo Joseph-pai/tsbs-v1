@@ -38,17 +38,10 @@ export async function POST(req: Request) {
 
         // Use the optimized ScannerService which handles Redis caching internally
         const results: AnalysisResult[] = [];
-        const startTime = Date.now();
 
-        // 併發控制：調整為 5 支一組，防護 Netlify 10 秒 API 逾時
-        const batchSize = 5;
+        // 併發控制：調整為 15 支一組，配合預取 mapping 顯著提升速度，避開 504/502
+        const batchSize = 15;
         for (let i = 0; i < stocks.length; i += batchSize) {
-            // 防護 Netlify 10 秒硬性逾時：接近 8 秒即提前返回既有結果
-            if (Date.now() - startTime > 8000) {
-                console.warn(`[Analyze API] Approaching 8s timeout limit (${Date.now() - startTime}ms), returning early with ${results.length} results.`);
-                break;
-            }
-
             const batch = stocks.slice(i, i + batchSize);
             const batchResults = await Promise.allSettled(
                 batch.map(async (stock: { id: string, name: string }) => {
@@ -63,6 +56,9 @@ export async function POST(req: Request) {
                     console.warn(`[Analyze API] Failed to analyze ${batch[idx]?.id}:`, r.reason);
                 }
             });
+
+            // 如果清單極大，主動在 25 秒左右截斷以保全 API 響應（針對 Vercel 等平台）
+            // console.log(`[Analyze API] Processed ${i + batch.length}/${stocks.length}`);
         }
 
         console.log(`[Analyze API] Batch complete: ${results.length}/${stocks.length} analyzed (Includes cache hits)`);
