@@ -627,14 +627,11 @@ export default function DashboardPage() {
       const targetTerm = activeTerm.trim();
       const isSearchId = targetTerm.length === 4 && !isNaN(parseInt(targetTerm));
 
-      // ── 方案 A：本地預篩，取 Top 20，只發 1 次 API ──────────────────
-      // 用快照的今日欄位做快速過濾（純前端 JS，不需任何 API 呼叫）
-      const PRE_FILTER_LIMIT = 20; // 只送 Top 20 給後端深度分析
-
+      // ── 方案 A 修正：本地預篩保持 200 支，每批 20 支送後端並行分析（10 次 API 取代原本 100 次）──
       const candidates = snapshot
         .filter(s => {
           const isTarget = isSearchId && s.stock_id === targetTerm;
-          // 預篩：紅 K（收盤 > 開盤）+ 有成交量 + 非重挫（spread >= -0.05）
+          // 預篩：紅 K（收盤 > 開盤）+ 有成交量 + 非重挫
           const isPotential = s.Trading_Volume > 500 && s.close > s.open && s.spread >= -0.05;
           return isTarget || isPotential;
         })
@@ -643,44 +640,48 @@ export default function DashboardPage() {
           const bIsTarget = isSearchId && b.stock_id === targetTerm;
           if (aIsTarget && !bIsTarget) return -1;
           if (!aIsTarget && bIsTarget) return 1;
-          // 主排序：成交量（代表市場關注度）
           return b.Trading_Volume - a.Trading_Volume;
         })
-        .slice(0, PRE_FILTER_LIMIT);
+        .slice(0, 200); // 維持原本 200 支覆蓋率
 
-      console.log(`[runScan] 本地預篩完成：從 ${snapshot.length} 支 → Top ${candidates.length} 支，準備發送深度分析...`);
-
-      setProgress({
-        current: candidates.length,
-        total: candidates.length,
-        phase: `⚡ 深度指標分析中（${candidates.length} 支）...`
-      });
+      console.log(`[runScan] 本地預篩完成：從 ${snapshot.length} 支 → ${candidates.length} 支候選，開始分批深度分析...`);
 
       const allResults: AnalysisResult[] = [];
+      const BATCH_SIZE = 20; // 每批 20 支，後端並行處理（原本 2 支）→ 10 次 API 取代 100 次
 
-      // ── 一次性發送全部 Top 20，後端並行處理（1 次 API 取代原本 125+ 次）──
-      if (candidates.length > 0) {
+      for (let i = 0; i < candidates.length; i += BATCH_SIZE) {
+        const batch = candidates.slice(i, i + BATCH_SIZE);
+        const batchNum = Math.floor(i / BATCH_SIZE) + 1;
+        const totalBatches = Math.ceil(candidates.length / BATCH_SIZE);
+
+        setProgress({
+          current: i + batch.length,
+          total: candidates.length,
+          phase: `⚡ 深度分析中 第 ${batchNum}/${totalBatches} 批（已分析 ${i + batch.length}/${candidates.length} 支）`
+        });
+
         const batchRes = await fetch('/api/scan/analyze', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            stocks: candidates.map(c => ({ id: c.stock_id, name: c.stock_name })),
+            stocks: batch.map(c => ({ id: c.stock_id, name: c.stock_name })),
             settings: settings
           })
         });
 
-        if (batchRes.ok) {
-          const batchJson = await batchRes.json();
-          if (batchJson.success && batchJson.data) {
-            const augmented = batchJson.data.map((r: any) => {
-              const resolvedSector = r.sector_name || (market === 'TWSE' ? '上市板' : '上櫃板');
-              const potential_score = r.comprehensiveScoreDetails?.total ?? ((r.score || 0) * 100);
-              return { ...r, sector_name: resolvedSector, potential_score };
-            });
-            allResults.push(...augmented);
-          }
-        } else {
-          console.warn(`[runScan] 深度分析 API 失敗 (HTTP ${batchRes.status})`);
+        if (!batchRes.ok) {
+          console.warn(`[runScan] 批次 ${batchNum} 失敗 (HTTP ${batchRes.status})，繼續下一批...`);
+          continue;
+        }
+
+        const batchJson = await batchRes.json();
+        if (batchJson.success && batchJson.data) {
+          const augmented = batchJson.data.map((r: any) => {
+            const resolvedSector = r.sector_name || (market === 'TWSE' ? '上市板' : '上櫃板');
+            const potential_score = r.comprehensiveScoreDetails?.total ?? ((r.score || 0) * 100);
+            return { ...r, sector_name: resolvedSector, potential_score };
+          });
+          allResults.push(...augmented);
         }
       }
 
@@ -777,9 +778,7 @@ export default function DashboardPage() {
       const targetTerm = searchTerm.trim();
       const isSearchId = targetTerm.length === 4 && !isNaN(parseInt(targetTerm));
 
-      // ── 方案 A：強化評分版本 — 本地預篩取 Top 20，只發 1 次 API ──
-      // 改用成交金額（量×價）排序，讓小股本被公平評估
-      const ENHANCED_LIMIT = 20;
+      // ── 方案 A 修正：強化評分版本 — 維持 250 支覆蓋，每批 20 支並行（13 次 API 取代 125 次）──
       const candidates = snap
         .filter(s => {
           const isTarget = isSearchId && s.stock_id === targetTerm;
@@ -797,38 +796,47 @@ export default function DashboardPage() {
           const bTurnover = (b as any).Trading_money || b.Trading_Volume * b.close;
           return bTurnover - aTurnover;
         })
-        .slice(0, ENHANCED_LIMIT);
+        .slice(0, 250); // 維持原本 250 支覆蓋率
 
-      console.log(`[runEnhancedScan] 本地預篩完成：從 ${snap.length} 支 → Top ${candidates.length} 支（成交金額排序）`);
-
-      setEnhancedProgress({ current: candidates.length, total: candidates.length, phase: `⚡ 強化深度分析中（${candidates.length} 支）...` });
+      console.log(`[runEnhancedScan] 本地預篩完成：從 ${snap.length} 支 → ${candidates.length} 支候選（成交金額排序），開始分批分析...`);
 
       const allEnhancedResults: AnalysisResult[] = [];
+      const ENHANCED_BATCH_SIZE = 20; // 每批 20 支並行（原本 2 支）→ 13 次 API 取代 125 次
 
-      // ── 一次性發送全部 Top 20，強化評分模式，後端並行處理（1 次 API）──
-      if (candidates.length > 0) {
+      for (let i = 0; i < candidates.length; i += ENHANCED_BATCH_SIZE) {
+        const batch = candidates.slice(i, i + ENHANCED_BATCH_SIZE);
+        const batchNum = Math.floor(i / ENHANCED_BATCH_SIZE) + 1;
+        const totalBatches = Math.ceil(candidates.length / ENHANCED_BATCH_SIZE);
+
+        setEnhancedProgress({
+          current: i + batch.length,
+          total: candidates.length,
+          phase: `⚡ 強化分析中 第 ${batchNum}/${totalBatches} 批（已分析 ${i + batch.length}/${candidates.length} 支）`
+        });
+
         const batchRes = await fetch('/api/scan/analyze', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            stocks: candidates.map(c => ({ id: c.stock_id, name: c.stock_name })),
+            stocks: batch.map(c => ({ id: c.stock_id, name: c.stock_name })),
             settings: settings,
             enhanced: true
           })
         });
 
-        if (batchRes.ok) {
-          const batchJson = await batchRes.json();
-          if (batchJson.success && batchJson.data) {
-            const augmented = batchJson.data.map((r: any) => ({
-              ...r,
-              sector_name: r.sector_name || (market === 'TWSE' ? '上市板' : '上櫃板'),
-              potential_score: r.comprehensiveScoreDetails?.total ?? ((r.score || 0) * 100)
-            }));
-            allEnhancedResults.push(...augmented);
-          }
-        } else {
-          console.warn(`[runEnhancedScan] 強化分析 API 失敗 (HTTP ${batchRes.status})`);
+        if (!batchRes.ok) {
+          console.warn(`[runEnhancedScan] 批次 ${batchNum} 失敗 (HTTP ${batchRes.status})，繼續下一批...`);
+          continue;
+        }
+
+        const batchJson = await batchRes.json();
+        if (batchJson.success && batchJson.data) {
+          const augmented = batchJson.data.map((r: any) => ({
+            ...r,
+            sector_name: r.sector_name || (market === 'TWSE' ? '上市板' : '上櫃板'),
+            potential_score: r.comprehensiveScoreDetails?.total ?? ((r.score || 0) * 100)
+          }));
+          allEnhancedResults.push(...augmented);
         }
       }
 
