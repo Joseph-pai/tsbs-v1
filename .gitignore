@@ -46,3 +46,6 @@ next-env.d.ts
 *.tsx.[0-9]*
 *.js.[0-9]*
 *.json.[0-9]*
+
+# backtest output directory
+backtest-results/

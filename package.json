@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test": "npx tsx --test src/backtest/*.test.ts"
+    "test": "npx tsx --test src/backtest/*.test.ts",
+    "backtest": "npx tsx scripts/backtest.ts"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.0.0",
