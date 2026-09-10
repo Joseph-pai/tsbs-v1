@@ -57,66 +57,54 @@ export const DataSyncService = {
     /**
      * 一鍵批量下載全市場最新股票數據並儲存至本地內部數據庫
      */
-    /**
-     * 一鍵平滑下載全市場最新股票數據並儲存至本地內部數據庫
-     */
     downloadLatestMarketData: async (
         onProgress?: (progress: { stage: string; percent: number }) => void
     ): Promise<{ success: boolean; timestamp: string; count: number; error?: string }> => {
         try {
-            const fetchJsonSafely = async (url: string) => {
-                try {
-                    const res = await fetch(url);
-                    if (!res.ok) {
-                        const text = await res.text().catch(() => '');
-                        console.warn(`[DataSync] HTTP ${res.status} for ${url}: ${text.slice(0, 100)}`);
-                        return { success: false, error: `HTTP ${res.status}` };
-                    }
-                    return await res.json();
-                } catch (e: any) {
-                    console.warn(`[DataSync] Fetch failed for ${url}:`, e);
-                    return { success: false, error: e.message };
-                }
-            };
+            onProgress?.({ stage: '正在準備向證交所抓取上市數據...', percent: 10 });
 
-            // 步驟 1: 下載上市 (TWSE) 快照
-            onProgress?.({ stage: '1/3 正在下載上市股票快照 (TWSE)...', percent: 15 });
-            const twseJson = await fetchJsonSafely('/api/market/snapshot?market=TWSE&sector=ALL&refresh=true');
-            const twseData: StockData[] = (twseJson && twseJson.success && Array.isArray(twseJson.data)) ? twseJson.data : [];
+            // 1. 同時抓取上市 (TWSE) 與上櫃 (TPEX) 快照
+            const [twseRes, tpexRes, mapRes] = await Promise.all([
+                fetch('/api/market/snapshot?market=TWSE&sector=ALL&refresh=true'),
+                fetch('/api/market/snapshot?market=TPEX&sector=AL&refresh=true'),
+                fetch('/api/market/industry-mapping?refresh=true')
+            ]);
 
-            // 步驟 2: 下載上櫃 (TPEX) 快照
-            onProgress?.({ stage: '2/3 正在下載上櫃股票快照 (TPEX)...', percent: 50 });
-            const tpexJson = await fetchJsonSafely('/api/market/snapshot?market=TPEX&sector=AL&refresh=true');
-            const tpexData: StockData[] = (tpexJson && tpexJson.success && Array.isArray(tpexJson.data)) ? tpexJson.data : [];
+            onProgress?.({ stage: '正在處理並優化資料格式...', percent: 60 });
 
-            // 步驟 3: 下載產業類別 Mapping
-            onProgress?.({ stage: '3/3 正在下載產業對應數據...', percent: 80 });
-            const mapJson = await fetchJsonSafely('/api/market/industry-mapping?refresh=true');
-            const industryMap = (mapJson && mapJson.success) ? mapJson.data : {};
+            const twseJson = await twseRes.json();
+            const tpexJson = await tpexRes.json();
+            const mapJson = await mapRes.json();
 
-            if (twseData.length === 0 && tpexData.length === 0) {
-                throw new Error('證交所與上櫃 API 目前忙碌中，請稍後重試');
+            if (!twseJson.success || !tpexJson.success) {
+                throw new Error('證交所數據下載失敗');
             }
 
-            onProgress?.({ stage: '寫入網站內部數據倉庫中...', percent: 90 });
+            const twseData: StockData[] = twseJson.data || [];
+            const tpexData: StockData[] = tpexJson.data || [];
+            const industryMap = mapJson.success ? mapJson.data : {};
 
-            // 儲存至 Storage
+            onProgress?.({ stage: '寫入內部數據倉庫中...', percent: 85 });
+
+            // 2. 儲存至 Storage
             const nowStr = format(new Date(), 'yyyy-MM-dd HH:mm:ss');
 
             try {
-                if (twseData.length > 0) localStorage.setItem(`${SNAPSHOT_KEY_PREFIX}TWSE`, JSON.stringify(twseData));
-                if (tpexData.length > 0) localStorage.setItem(`${SNAPSHOT_KEY_PREFIX}TPEX`, JSON.stringify(tpexData));
-                if (Object.keys(industryMap).length > 0) localStorage.setItem(INDUSTRY_MAP_KEY, JSON.stringify(industryMap));
+                localStorage.setItem(`${SNAPSHOT_KEY_PREFIX}TWSE`, JSON.stringify(twseData));
+                localStorage.setItem(`${SNAPSHOT_KEY_PREFIX}TPEX`, JSON.stringify(tpexData));
+                localStorage.setItem(INDUSTRY_MAP_KEY, JSON.stringify(industryMap));
                 localStorage.setItem(SYNC_TIME_KEY, nowStr);
             } catch (storageError) {
-                console.warn('[DataSync] localStorage full, fallback to sessionStorage');
-                if (twseData.length > 0) sessionStorage.setItem(`${SNAPSHOT_KEY_PREFIX}TWSE`, JSON.stringify(twseData));
-                if (tpexData.length > 0) sessionStorage.setItem(`${SNAPSHOT_KEY_PREFIX}TPEX`, JSON.stringify(tpexData));
-                if (Object.keys(industryMap).length > 0) sessionStorage.setItem(INDUSTRY_MAP_KEY, JSON.stringify(industryMap));
+                // 如果 localStorage 配額額滿，回退使用 sessionStorage
+                console.warn('[DataSync] localStorage quota exceeded, fallback to sessionStorage');
+                sessionStorage.setItem(`${SNAPSHOT_KEY_PREFIX}TWSE`, JSON.stringify(twseData));
+                sessionStorage.setItem(`${SNAPSHOT_KEY_PREFIX}TPEX`, JSON.stringify(tpexData));
+                sessionStorage.setItem(INDUSTRY_MAP_KEY, JSON.stringify(industryMap));
                 sessionStorage.setItem(SYNC_TIME_KEY, nowStr);
             }
 
             const totalCount = twseData.length + tpexData.length;
+
             onProgress?.({ stage: `下載完成！已載入 ${totalCount} 檔股票`, percent: 100 });
 
             return {

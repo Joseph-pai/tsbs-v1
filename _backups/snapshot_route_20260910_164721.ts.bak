@@ -35,23 +35,12 @@ export async function GET(req: Request) {
 
         console.log(`[Snapshot API] ${refresh ? 'Force Refresh' : 'Cache Miss'}: Targeting ${market} - SubSector: ${sector}`);
 
-        let data: any[] = [];
-        const fetchPromise = (async () => {
-            if (sector === 'ALL' || sector === 'AL') {
-                return await ExchangeClient.getAllMarketQuotes(market);
-            } else {
-                return await ExchangeClient.getQuotesBySector(market, sector);
-            }
-        })();
-
-        const timeoutPromise = new Promise<any[]>((resolve) =>
-            setTimeout(() => {
-                console.warn(`[Snapshot API] Fetch timeout (7.5s), resolving empty for ${market}`);
-                resolve([]);
-            }, 7500)
-        );
-
-        data = await Promise.race([fetchPromise, timeoutPromise]);
+        let data = [];
+        if (sector === 'ALL' || sector === 'AL') {
+            data = await ExchangeClient.getAllMarketQuotes(market);
+        } else {
+            data = await ExchangeClient.getQuotesBySector(market, sector);
+        }
 
         // 2. Save to Cache (if data found)
         if (data && data.length > 0) {

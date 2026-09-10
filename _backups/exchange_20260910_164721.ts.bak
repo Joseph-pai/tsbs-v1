@@ -109,7 +109,7 @@ export const ExchangeClient = {
     getAllMarketQuotes: async (market: 'TWSE' | 'TPEX'): Promise<StockData[]> => {
         if (market === 'TWSE') {
             const url = `https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL`;
-            const res = await axios.get(url, { timeout: 7000 });
+            const res = await axios.get(url);
             const parseNum = (val: any) => {
                 if (typeof val === 'number') return val;
                 if (!val) return 0;
@@ -132,7 +132,7 @@ export const ExchangeClient = {
             })).filter((s: any) => s.close > 0 && s.stock_id && s.stock_id.length === 4);
         } else {
             const url = `https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes`;
-            const res = await axios.get(url, { timeout: 7000 });
+            const res = await axios.get(url);
 
             if (!Array.isArray(res.data)) {
                 console.error(`[Exchange] TPEX OpenAPI returned invalid data:`, res.data);
