@@ -49,3 +49,8 @@ next-env.d.ts
 
 # backtest output directory
 backtest-results/
+
+# python cache
+__pycache__/
+*.pyc
+
