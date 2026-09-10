@@ -38,14 +38,17 @@ export async function GET(
             }, { status: 404 });
         }
 
+        const enrichedResults = await ScannerService.enrichResultsWithEventAlpha([result]);
+        const finalResult = enrichedResults[0] || result;
+
         // 3. Save to Result Cache
         try {
-            await redis.set(cacheKey, JSON.stringify(result), 'EX', TTL);
+            await redis.set(cacheKey, JSON.stringify(finalResult), 'EX', TTL);
         } catch (e) { }
 
         return NextResponse.json({
             success: true,
-            data: result
+            data: finalResult
         });
     } catch (error: any) {
         console.error(`Analysis Error [${id}]:`, error);

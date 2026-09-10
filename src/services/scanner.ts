@@ -5,7 +5,7 @@ import { evaluateStock, calculateVRatio, checkMaConstrict, checkVolumeIncreasing
 import { AnalysisResult, StockData } from '@/types';
 import { format, subDays } from 'date-fns';
 import { calculateSMA } from './indicators';
-import { crawlStockEvents } from './eventAlpha/scraplingClient';
+import { crawlStockEvents, checkScraplingHealth } from './eventAlpha/scraplingClient';
 import { normalizeEventBatch } from './eventAlpha/eventNormalizer';
 import { calculateEventAlphaScore } from './eventAlpha/eventScorer';
 
@@ -81,6 +81,19 @@ async function enrichWithEventAlpha(
     if (!result || !result.stock_id) return result;
 
     try {
+        const isHealthy = await checkScraplingHealth(200);
+        if (!isHealthy) {
+            return {
+                ...result,
+                eventAlphaScore: null,
+                eventCount: 0,
+                events: [],
+                eventSources: [],
+                latestEventAt: null,
+                eventAlphaStatus: 'Scrapling 服務未啟動',
+            };
+        }
+
         const rawEvents = await crawlStockEvents(result.stock_id);
 
         if (!rawEvents || rawEvents.length === 0) {
@@ -160,6 +173,14 @@ async function enrichWithEventAlpha(
 }
 
 export const ScannerService = {
+    /**
+     * 批次為結果附加 Event Alpha 數據
+     */
+    enrichResultsWithEventAlpha: async (results: AnalysisResult[]): Promise<AnalysisResult[]> => {
+        if (!results || results.length === 0) return results;
+        return await Promise.all(results.map(res => enrichWithEventAlpha(res)));
+    },
+
     /**
      * Stage 1: Discovery (兩階段篩選 - 避免超時)
      * 
@@ -1126,6 +1147,12 @@ export const ScannerService = {
                     total: engineDetails.total ?? 0
                 },
                 is_recommended: (finalScore >= 0.6 || (result.vRatio >= volThreshold && result.maData.constrictValue <= squeezeThreshold && result.changePercent >= breakoutThreshold)) && result.is_bullish,
+                eventAlphaScore: null,
+                eventCount: 0,
+                events: [],
+                eventSources: [],
+                latestEventAt: null,
+                eventAlphaStatus: '尚未附加事件資料',
                 analysisHints: {
                     technicalSignals: `V-Ratio ${result.vRatio.toFixed(1)}x${result.maData.isSqueezing ? ' • 均線糾結' : ''}${result.is_bullish ? ' • 多頭排列' : ' • 空頭慣性'}`,
                     chipSignals: consecutiveBuy > 0 ? `法人連買 ${consecutiveBuy} 日` : '籌碼動能待轉強',
@@ -1137,7 +1164,7 @@ export const ScannerService = {
                 }
             };
 
-            return await enrichWithEventAlpha(baseAnalysisResult);
+            return baseAnalysisResult;
         } catch (error: any) {
             console.error(`Analysis failed for ${stockId}:`, error.message);
             throw error;
