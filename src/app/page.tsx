@@ -922,23 +922,40 @@ export default function DashboardPage() {
         setShortTermProgress({ current: 10, total: 100, phase: `從歷史紀錄提取 ${stockIds.length} 檔個股，準備分析...` });
       } else {
         // ── 即時全市場模式 ──
-        setShortTermProgress({ current: 5, total: 100, phase: '正在取得全市場候選股名單...' });
-        const res = await fetch('/api/scan/short-term-v31', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ market, action: 'candidates' })
-        });
-        const json = await res.json();
-        if (!json.success) throw new Error(json.error || '無法取得候選股名單');
-        stockIds = json.candidates || [];
+        setShortTermProgress({ current: 5, total: 100, phase: '正在取得全市場候選股名單（優先使用預載庫）...' });
+        
+        let snapshot = DataSyncService.getLocalSnapshot(market);
+        if (!snapshot || snapshot.length === 0) {
+          // 若本地無快照，向 API 取得
+          try {
+            const res = await fetch('/api/scan/short-term-v31', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ market, action: 'candidates' })
+            });
+            if (res.ok) {
+              const json = await res.json();
+              stockIds = json.candidates || [];
+            }
+          } catch (e) {
+            console.warn('[ShortTermScan] 候選股線上取得失敗:', e);
+          }
+        } else {
+          // 直接從全市場預載庫提取高量能標的（即時 0 秒）
+          stockIds = snapshot
+            .filter(s => s.Trading_Volume >= 300 && s.close >= 5 && s.close > 0)
+            .sort((a, b) => b.Trading_Volume - a.Trading_Volume)
+            .slice(0, 300)
+            .map(s => s.stock_id);
+        }
       }
 
       if (stockIds.length === 0) {
-        throw new Error('目前無可分析的候選股票');
+        throw new Error('目前無可分析的候選股票，請先點擊上方「下載最新股票數據」進行預載。');
       }
 
-      // ── 分批執行短線掃描 ──
-      const BATCH_SIZE = 30;
+      // ── 分批執行短線掃描 (以 10 支/批避開 Netlify 10秒 502 Timeout) ──
+      const BATCH_SIZE = 10;
       const allResults: any[] = [];
       let finalMeta: any = null;
       let finalTiming: any = null;
@@ -954,27 +971,31 @@ export default function DashboardPage() {
           phase: `正在分析第 ${batchIndex} / ${totalBatches} 批股票... (已找到 ${allResults.length} 檔符合個股)`
         });
 
-        const res = await fetch(`/api/scan/short-term-v31`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            market: market,
-            stockIds: batchIds
-          })
-        });
-        const json = await res.json();
-        if (json.success) {
-          if (json.data && Array.isArray(json.data)) {
-            allResults.push(...json.data);
+        try {
+          const res = await fetch(`/api/scan/short-term-v31`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              market: market,
+              stockIds: batchIds
+            })
+          });
+          if (res.ok) {
+            const json = await res.json();
+            if (json.success) {
+              if (json.data && Array.isArray(json.data)) {
+                allResults.push(...json.data);
+              }
+              if (json.meta) finalMeta = json.meta;
+              if (json.timing) finalTiming = json.timing;
+            } else {
+              console.warn(`[ShortTermScan] 批次 ${batchIndex} 分析失敗:`, json.error);
+            }
+          } else {
+            console.warn(`[ShortTermScan] 批次 ${batchIndex} 伺服器回應狀態: ${res.status}`);
           }
-          if (json.meta) {
-            finalMeta = json.meta;
-          }
-          if (json.timing) {
-            finalTiming = json.timing;
-          }
-        } else {
-          console.warn(`[ShortTermScan] 批次 ${batchIndex} 分析失敗:`, json.error);
+        } catch (batchErr: any) {
+          console.warn(`[ShortTermScan] 批次 ${batchIndex} 網絡連線異常:`, batchErr?.message || batchErr);
         }
       }
 

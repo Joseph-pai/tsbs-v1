@@ -27,8 +27,12 @@ export async function GET(req: Request) {
             }
         }
 
-        // 2. Fetch Fresh
-        const mapping = await ExchangeClient.getIndustryMapping();
+        // 2. Fetch Fresh with 6s timeout race
+        const fetchPromise = ExchangeClient.getIndustryMapping();
+        const timeoutPromise = new Promise<Record<string, string>>((resolve) =>
+            setTimeout(() => resolve({}), 6000)
+        );
+        const mapping = await Promise.race([fetchPromise, timeoutPromise]);
 
         // 3. Save to Cache
         if (mapping && Object.keys(mapping).length > 0) {
