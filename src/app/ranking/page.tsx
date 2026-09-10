@@ -382,17 +382,30 @@ export default function RankingPage() {
                                                 </div>
                                             </td>
 
-                                            {/* Event Alpha Score */}
+                                             {/* Event Alpha Score */}
                                             <td style={{ padding: '11px 14px', textAlign: 'center' }}>
-                                                <span style={{
-                                                    padding: '3px 10px', borderRadius: 6, fontSize: 11,
-                                                    background: 'rgba(255,255,255,0.04)',
-                                                    border: '1px solid rgba(255,255,255,0.08)',
-                                                    color: '#44475a',
-                                                }}>
-                                                    N/A
-                                                </span>
-                                                <div style={{ fontSize: 9, color: '#44475a', marginTop: 2 }}>尚無A/B證據</div>
+                                                {s.eventAlphaScore !== null && s.eventAlphaScore !== undefined ? (
+                                                    <span style={{
+                                                        padding: '3px 10px', borderRadius: 6, fontSize: 11, fontWeight: 700,
+                                                        background: 'rgba(120,120,255,0.15)',
+                                                        border: '1px solid rgba(120,120,255,0.3)',
+                                                        color: '#a78bfa',
+                                                    }}>
+                                                        {s.eventAlphaScore > 0 ? `+${s.eventAlphaScore}` : s.eventAlphaScore}
+                                                    </span>
+                                                ) : (
+                                                    <span style={{
+                                                        padding: '3px 10px', borderRadius: 6, fontSize: 11,
+                                                        background: 'rgba(255,255,255,0.04)',
+                                                        border: '1px solid rgba(255,255,255,0.08)',
+                                                        color: '#44475a',
+                                                    }}>
+                                                        N/A
+                                                    </span>
+                                                )}
+                                                <div style={{ fontSize: 9, color: '#44475a', marginTop: 2 }}>
+                                                    {s.eventAlphaScore !== null && s.eventAlphaScore !== undefined ? '獨立評分' : '尚無A/B證據'}
+                                                </div>
                                             </td>
 
                                             {/* Hit Rate */}

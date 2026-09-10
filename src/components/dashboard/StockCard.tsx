@@ -148,8 +148,8 @@ export const StockCard: React.FC<StockCardProps> = ({ data, index, onClick }) =>
                                 </div>
                             );
                         })()}
-                        {/* Win Rate + Explosive Score (下方，較小，並排) */}
-                        <div className="flex items-center gap-2">
+                            {/* Win Rate + Explosive + Event Alpha Score (下方，較小，並排) */}
+                        <div className="flex flex-wrap items-center justify-end gap-2">
                             {/* Win Rate Score Badge */}
                             <div
                                 className="group/badge relative flex items-center gap-1.5 bg-blue-500/10 border border-blue-500/30 rounded-lg px-3 py-1 cursor-help"
@@ -168,6 +168,18 @@ export const StockCard: React.FC<StockCardProps> = ({ data, index, onClick }) =>
                                 <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">爆發力</span>
                                 <span className="text-base font-black font-mono text-amber-400">
                                     {Math.round(data.explosive_score ?? (data.potential_score || data.comprehensiveScoreDetails?.total || ((data.score || 0) * 100)))}
+                                </span>
+                            </div>
+                            {/* Event Alpha Score Badge */}
+                            <div
+                                className="group/badge relative flex items-center gap-1.5 bg-indigo-500/10 border border-indigo-500/30 rounded-lg px-3 py-1 cursor-help"
+                                title={`【Event Alpha Score】\n依據公開事件與公告計算之獨立評分。\n公開事件數: ${data.eventCount || 0} 筆。\n⚠️ 獨立數據，不影響 Technical Ranking 排序。`}
+                            >
+                                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Event Alpha</span>
+                                <span className={cn("text-base font-black font-mono", data.eventAlphaScore !== null && data.eventAlphaScore !== undefined ? "text-indigo-400" : "text-slate-500")}>
+                                    {data.eventAlphaScore !== null && data.eventAlphaScore !== undefined
+                                        ? (data.eventAlphaScore > 0 ? `+${data.eventAlphaScore}` : data.eventAlphaScore)
+                                        : 'N/A'}
                                 </span>
                             </div>
                         </div>

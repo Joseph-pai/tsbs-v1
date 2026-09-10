@@ -94,6 +94,14 @@ export interface AnalysisResult {
     win_rate_score?: number;     // 勝率分數 (0-100)
     explosive_score?: number;    // 爆發力分數 (0-100+)
     whyBullish?: string;
+
+    // Event Alpha 分析數據 (獨立資訊層，不影響 Technical Ranking / Score)
+    eventAlphaScore?: number | null;
+    eventCount?: number;
+    events?: any[];
+    eventSources?: string[];
+    latestEventAt?: string | null;
+    eventAlphaStatus?: string;
 }
 
 export interface StockCandle {

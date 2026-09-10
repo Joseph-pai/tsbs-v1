@@ -5,6 +5,9 @@ import { evaluateStock, calculateVRatio, checkMaConstrict, checkVolumeIncreasing
 import { AnalysisResult, StockData } from '@/types';
 import { format, subDays } from 'date-fns';
 import { calculateSMA } from './indicators';
+import { crawlStockEvents } from './eventAlpha/scraplingClient';
+import { normalizeEventBatch } from './eventAlpha/eventNormalizer';
+import { calculateEventAlphaScore } from './eventAlpha/eventScorer';
 
 /**
  * Normalize date format: handles both ROC (民國 RRRY/MM/DD) and ISO (YYYY-MM-DD) formats
@@ -64,6 +67,98 @@ function normalizeMonthlyDate(dateStr: string): string {
     console.warn(`[normalizeMonthlyDate] Unrecognized monthly date format: ${dateStr}`);
     return s;
 }
+
+/**
+ * 獨立 Event Alpha 資訊擴充函式
+ * 對分析通過之個股向 Scrapling 獲取事件資料並計算獨立 Event Alpha Score
+ * 具備 Look-ahead bias (publishedAt) 防護與 Timeout 降級機制
+ * 100% 確保不修改 Technical Score、選股條件與 Ranking 排序
+ */
+async function enrichWithEventAlpha(
+    result: AnalysisResult,
+    scanCutoffTimeStr?: string
+): Promise<AnalysisResult> {
+    if (!result || !result.stock_id) return result;
+
+    try {
+        const rawEvents = await crawlStockEvents(result.stock_id);
+
+        if (!rawEvents || rawEvents.length === 0) {
+            return {
+                ...result,
+                eventAlphaScore: null,
+                eventCount: 0,
+                events: [],
+                eventSources: [],
+                latestEventAt: null,
+                eventAlphaStatus: '無公開事件資料',
+            };
+        }
+
+        const normalizedEvents = normalizeEventBatch(rawEvents);
+
+        // publishedAt 未來時間洩漏防護 (Look-ahead bias guard)
+        const cutoffTime = scanCutoffTimeStr ? new Date(scanCutoffTimeStr).getTime() : Date.now();
+        const validEvents = normalizedEvents.filter(evt => {
+            const pubTime = new Date(evt.publishedAt).getTime();
+            return !isNaN(pubTime) && pubTime <= cutoffTime;
+        });
+
+        if (validEvents.length === 0) {
+            return {
+                ...result,
+                eventAlphaScore: null,
+                eventCount: 0,
+                events: [],
+                eventSources: [],
+                latestEventAt: null,
+                eventAlphaStatus: '事件日期超過掃描時間',
+            };
+        }
+
+        // 按 publishedAt 排序，最新優先
+        const sortedEvents = [...validEvents].sort(
+            (a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime()
+        );
+        const latestEvent = sortedEvents[0];
+
+        const scoreResult = calculateEventAlphaScore(
+            {
+                eventType: latestEvent.eventType,
+                sourceType: latestEvent.sourceType,
+                confidence: latestEvent.confidence,
+                publishedAt: latestEvent.publishedAt,
+                sentiment: latestEvent.sentiment,
+                impactScore: latestEvent.impactScore,
+            },
+            scanCutoffTimeStr
+        );
+
+        const sources = Array.from(new Set(validEvents.map(e => e.sourceType)));
+
+        return {
+            ...result,
+            eventAlphaScore: scoreResult.eventAlphaScore,
+            eventCount: validEvents.length,
+            events: validEvents,
+            eventSources: sources,
+            latestEventAt: latestEvent.publishedAt,
+            eventAlphaStatus: 'Event Alpha 接入完成 (獨立分析)',
+        };
+    } catch (e: any) {
+        console.warn(`[enrichWithEventAlpha] Failed for ${result.stock_id}:`, e.message);
+        return {
+            ...result,
+            eventAlphaScore: null,
+            eventCount: 0,
+            events: [],
+            eventSources: [],
+            latestEventAt: null,
+            eventAlphaStatus: 'Scrapling 服務不可用',
+        };
+    }
+}
+
 export const ScannerService = {
     /**
      * Stage 1: Discovery (兩階段篩選 - 避免超時)
@@ -675,10 +770,17 @@ export const ScannerService = {
         }
 
         console.log(`[ShortTermScan] 完成：${finalResults.length} 支通過（原始 ${totalFiltered} 支）`);
-        console.log(`[ShortTermScan] 總耗時: ${t2 - t0}ms`);
+
+        // 獨立 Event Alpha 數據附加 (不改變 finalResults 排序)
+        const enrichedResults = await Promise.all(
+            finalResults.map(res => enrichWithEventAlpha(res))
+        );
+
+        console.log(`[ShortTermScan] Event Alpha 附加完成`);
+        console.log(`[ShortTermScan] 總耗時: ${Date.now() - t0}ms`);
 
         return {
-            results: finalResults,
+            results: enrichedResults,
             meta: {
                 marketLevel,
                 marketMode,
@@ -987,7 +1089,7 @@ export const ScannerService = {
 
             const finalStockName = stockName || today.stock_name || ExchangeClient.getStockName(stockId) || stockId;
 
-            return {
+            const baseAnalysisResult: AnalysisResult = {
                 stock_id: stockId,
                 stock_name: finalStockName,
                 sector_name: (mapping as Record<string, string>)[stockId.trim()] || '其他',
@@ -1034,6 +1136,8 @@ export const ScannerService = {
                     fundamental: revenueSupport ? '營收趨勢向上' : '數據待觀察'
                 }
             };
+
+            return await enrichWithEventAlpha(baseAnalysisResult);
         } catch (error: any) {
             console.error(`Analysis failed for ${stockId}:`, error.message);
             throw error;
