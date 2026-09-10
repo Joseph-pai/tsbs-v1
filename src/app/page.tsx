@@ -631,8 +631,8 @@ export default function DashboardPage() {
       const candidates = snapshot
         .filter(s => {
           const isTarget = isSearchId && s.stock_id === targetTerm;
-          // 預篩：紅 K（收盤 > 開盤）+ 有成交量 + 非重挫
-          const isPotential = s.Trading_Volume > 500 && s.close > s.open && s.spread >= -0.05;
+          // 預篩：有成交量 + 非重挫（與原版相同）
+          const isPotential = s.Trading_Volume > 0 && s.spread >= -0.1;
           return isTarget || isPotential;
         })
         .sort((a, b) => {
@@ -782,8 +782,8 @@ export default function DashboardPage() {
       const candidates = snap
         .filter(s => {
           const isTarget = isSearchId && s.stock_id === targetTerm;
-          // 強化預篩：紅 K + 有成交量
-          const isPotential = s.Trading_Volume > 500 && s.close > s.open && s.spread >= -0.05;
+          // 強化預篩：有成交量 + 非重挫（與原版相同）
+          const isPotential = s.Trading_Volume > 0 && s.spread >= -0.1;
           return isTarget || isPotential;
         })
         .sort((a, b) => {
