@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test": "npx tsx --test src/backtest/targetDefinition.test.ts"
+    "test": "npx tsx --test src/backtest/*.test.ts"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.0.0",
