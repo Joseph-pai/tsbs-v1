@@ -711,123 +711,102 @@ export const ScannerService = {
             const todayStr = format(new Date(), 'yyyy-MM-dd');
             const redis = (await import('@/lib/redis')).redis;
 
-            // 1. Concurrent Fetching of Stock Data (Prices, Inst, Revenue, Margin)
-            const fetchPrices = async (): Promise<StockData[]> => {
-                let p: StockData[] = [];
-                const priceCacheKey = `tsbs:raw:hist:${stockId}:${todayStr}`;
-                try {
-                    const cached = await redis.get(priceCacheKey);
-                    if (cached) p = JSON.parse(cached);
-                } catch (e) { console.warn('Redis read error (price):', e); }
+            // 1. Fetch Price History (Cache: 4h)
+            let prices: StockData[] = [];
+            const priceCacheKey = `tsbs:raw:hist:${stockId}:${todayStr}`;
+            try {
+                const cached = await redis.get(priceCacheKey);
+                if (cached) prices = JSON.parse(cached);
+            } catch (e) { console.warn('Redis read error (price):', e); }
 
-                if (p.length < 25) {
+            if (prices.length < 25) {
+                try {
+                    const endDate = todayStr;
+                    const startDate = format(subDays(new Date(), 60), 'yyyy-MM-dd');
+                    prices = await FinMindClient.getDailyStats({ stockId, startDate, endDate });
+                } catch (e) {
+                    console.warn(`[Analyze] FinMind price failed for ${stockId}, fallback to Exchange...`);
+                }
+                if (prices.length < 25) {
+                    console.warn(`[Analyze] FinMind returned insufficient data (${prices.length} days) for ${stockId}, using Exchange fallback...`);
+                    warnings.push('Price data fallback to secondary source');
                     try {
-                        const endDate = todayStr;
-                        const startDate = format(subDays(new Date(), 60), 'yyyy-MM-dd');
-                        p = await FinMindClient.getDailyStats({ stockId, startDate, endDate });
+                        prices = await ExchangeClient.getStockHistory(stockId);
                     } catch (e) {
-                        console.warn(`[Analyze] FinMind price failed for ${stockId}, fallback to Exchange...`);
-                    }
-                    if (p.length < 25) {
-                        console.warn(`[Analyze] FinMind returned insufficient data (${p.length} days) for ${stockId}, using Exchange fallback...`);
-                        warnings.push('Price data fallback to secondary source');
-                        try {
-                            p = await ExchangeClient.getStockHistory(stockId);
-                        } catch (e) {
-                            console.error(`[Analyze] Exchange fallback also failed for ${stockId}:`, e);
-                        }
-                    }
-                    if (p.length > 0) {
-                        try { await redis.set(priceCacheKey, JSON.stringify(p), 'EX', 14400); } catch (e) { }
+                        console.error(`[Analyze] Exchange fallback also failed for ${stockId}:`, e);
                     }
                 }
-                return p;
-            };
+                if (prices.length > 0) {
+                    try { await redis.set(priceCacheKey, JSON.stringify(prices), 'EX', 14400); } catch (e) { }
+                }
+            }
 
-            const fetchInsts = async (): Promise<any[]> => {
-                let data: any[] = [];
-                const instCacheKey = `tsbs:raw:inst:${stockId}:${todayStr}`;
+            // 1. Fetch Prices already done in analyzeStock entry logic or within this try block
+            // 2. Fetch Institutional Flow (Cache: 4h)
+            let insts: any[] = [];
+            const instCacheKey = `tsbs:raw:inst:${stockId}:${todayStr}`;
+            try {
+                const cached = await redis.get(instCacheKey);
+                if (cached) insts = JSON.parse(cached);
+            } catch (e) { console.warn('Redis read error (inst):', e); }
+
+            if (insts.length === 0) {
                 try {
-                    const cached = await redis.get(instCacheKey);
-                    if (cached) data = JSON.parse(cached);
-                } catch (e) { console.warn('Redis read error (inst):', e); }
-
-                if (data.length === 0) {
-                    try {
-                        data = await FinMindClient.getInstitutional({
-                            stockId,
-                            startDate: format(subDays(new Date(), 10), 'yyyy-MM-dd'),
-                            endDate: todayStr
-                        });
-                        if (data.length > 0) {
-                            try { await redis.set(instCacheKey, JSON.stringify(data), 'EX', 14400); } catch (e) { }
-                        }
-                    } catch (e) {
-                        console.warn(`[Analyze] Inst fetch failed for ${stockId}`);
-                        warnings.push('Missing institutional flow data (FinMind error)');
+                    insts = await FinMindClient.getInstitutional({
+                        stockId,
+                        startDate: format(subDays(new Date(), 10), 'yyyy-MM-dd'),
+                        endDate: todayStr
+                    });
+                    if (insts.length > 0) {
+                        try { await redis.set(instCacheKey, JSON.stringify(insts), 'EX', 14400); } catch (e) { }
                     }
+                } catch (e) {
+                    console.warn(`[Analyze] Inst fetch failed for ${stockId}`);
+                    warnings.push('Missing institutional flow data (FinMind error)');
                 }
-                return data;
-            };
+            }
 
-            const fetchRevenue = async (): Promise<any[]> => {
-                let data: any[] = [];
-                const revCacheKey = `tsbs:raw:rev:${stockId}:${todayStr}`;
+            // 3. Fetch Monthly Revenue (Cache: 12h)
+            let rev: any[] = [];
+            const revCacheKey = `tsbs:raw:rev:${stockId}:${todayStr}`;
+            try {
+                const cached = await redis.get(revCacheKey);
+                if (cached) rev = JSON.parse(cached);
+            } catch (e) { console.warn('Redis read error (rev):', e); }
+
+            if (rev.length === 0) {
                 try {
-                    const cached = await redis.get(revCacheKey);
-                    if (cached) data = JSON.parse(cached);
-                } catch (e) { console.warn('Redis read error (rev):', e); }
-
-                if (data.length === 0) {
-                    try {
-                        const revStart = format(subDays(new Date(), 400), 'yyyy-MM-dd');
-                        data = await FinMindExtras.getMonthlyRevenue({ stockId, startDate: revStart, endDate: todayStr });
-                        if (data.length > 0) {
-                            try { await redis.set(revCacheKey, JSON.stringify(data), 'EX', 43200); } catch (e) { }
-                        }
-                    } catch (e) {
-                        console.warn(`[Analyze] Revenue fetch failed for ${stockId}`);
-                        warnings.push('Monthly revenue data unavailable');
+                    const revStart = format(subDays(new Date(), 400), 'yyyy-MM-dd');
+                    rev = await FinMindExtras.getMonthlyRevenue({ stockId, startDate: revStart, endDate: todayStr });
+                    if (rev.length > 0) {
+                        try { await redis.set(revCacheKey, JSON.stringify(rev), 'EX', 43200); } catch (e) { }
                     }
+                } catch (e) {
+                    console.warn(`[Analyze] Revenue fetch failed for ${stockId}`);
+                    warnings.push('Monthly revenue data unavailable');
                 }
-                return data;
-            };
+            }
 
-            const fetchMargin = async (): Promise<any[]> => {
-                let data: any[] = [];
-                const marginCacheKey = `tsbs:raw:margin:${stockId}:${todayStr}`;
+            // 4. Fetch Margin Trading Data (Cache: 4h)
+            let marginData: any[] = [];
+            const marginCacheKey = `tsbs:raw:margin:${stockId}:${todayStr}`;
+            try {
+                const cached = await redis.get(marginCacheKey);
+                if (cached) marginData = JSON.parse(cached);
+            } catch (e) { console.warn('Redis read error (margin):', e); }
+
+            if (marginData.length === 0) {
                 try {
-                    const cached = await redis.get(marginCacheKey);
-                    if (cached) data = JSON.parse(cached);
-                } catch (e) { console.warn('Redis read error (margin):', e); }
-
-                if (data.length === 0) {
-                    try {
-                        data = await FinMindExtras.getMarginTrading({
-                            stockId,
-                            startDate: format(subDays(new Date(), 10), 'yyyy-MM-dd'),
-                            endDate: todayStr
-                        });
-                        if (data.length > 0) {
-                            try { await redis.set(marginCacheKey, JSON.stringify(data), 'EX', 14400); } catch (e) { }
-                        }
-                    } catch (e) { console.warn(`[Analyze] Margin fetch failed for ${stockId}`); }
-                }
-                return data;
-            };
-
-            // Concurrent execution for 75% faster data loading per stock
-            const [pricesRes, instsRes, revRes, marginRes] = await Promise.allSettled([
-                fetchPrices(),
-                fetchInsts(),
-                fetchRevenue(),
-                fetchMargin()
-            ]);
-
-            const prices = pricesRes.status === 'fulfilled' ? pricesRes.value : [];
-            const insts = instsRes.status === 'fulfilled' ? instsRes.value : [];
-            const rev = revRes.status === 'fulfilled' ? revRes.value : [];
-            const marginData = marginRes.status === 'fulfilled' ? marginRes.value : [];
+                    marginData = await FinMindExtras.getMarginTrading({
+                        stockId,
+                        startDate: format(subDays(new Date(), 10), 'yyyy-MM-dd'),
+                        endDate: todayStr
+                    });
+                    if (marginData.length > 0) {
+                        try { await redis.set(marginCacheKey, JSON.stringify(marginData), 'EX', 14400); } catch (e) { }
+                    }
+                } catch (e) { console.warn(`[Analyze] Margin fetch failed for ${stockId}`); }
+            }
 
             if (prices.length < 3) {
                 console.warn(`[Analyze] Insufficient data for ${stockId} (${prices.length} days found)`);

@@ -6,7 +6,6 @@ export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
 export async function POST(req: Request) {
-    const startTime = Date.now();
     try {
         const { stocks, settings, enhanced } = await req.json(); // stocks: { id, name }[]
 
@@ -39,13 +38,14 @@ export async function POST(req: Request) {
 
         // Use the optimized ScannerService which handles Redis caching internally
         const results: AnalysisResult[] = [];
+        const startTime = Date.now();
 
-        // 併發控制：調整為 2 支一組，防護 Netlify 10 秒 API 逾時
-        const batchSize = 2;
+        // 併發控制：調整為 5 支一組，防護 Netlify 10 秒 API 逾時
+        const batchSize = 5;
         for (let i = 0; i < stocks.length; i += batchSize) {
-            // 防護 Netlify 10 秒硬性逾時：接近 6 秒即提前返回既有結果
-            if (Date.now() - startTime > 6000) {
-                console.warn(`[Analyze API] Approaching 6s timeout limit (${Date.now() - startTime}ms), returning early with ${results.length} results.`);
+            // 防護 Netlify 10 秒硬性逾時：接近 8 秒即提前返回既有結果
+            if (Date.now() - startTime > 8000) {
+                console.warn(`[Analyze API] Approaching 8s timeout limit (${Date.now() - startTime}ms), returning early with ${results.length} results.`);
                 break;
             }
 

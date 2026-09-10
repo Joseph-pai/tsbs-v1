@@ -1,33 +1,30 @@
 import Redis from 'ioredis';
 
-const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
+const hasRedisUrl = !!process.env.REDIS_URL;
+
+// Mock Redis client when REDIS_URL is not configured (e.g. Netlify serverless without Redis)
+// This prevents 5-second socket connection timeouts on every API invocation.
+const dummyRedis = {
+    get: async () => null,
+    set: async () => 'OK',
+    del: async () => 0,
+    on: () => dummyRedis,
+    setMaxListeners: () => dummyRedis,
+} as unknown as Redis;
 
 const globalForRedis = global as unknown as { redis: Redis };
 
-// Optimized for Serverless/Local environments:
-// Added connection timeout to prevent hangs when Redis is unavailable.
-export const redis = globalForRedis.redis || new Redis(redisUrl, {
-    connectTimeout: 5000, // 5s timeout
-    maxRetriesPerRequest: 1, // Fail fast
-    retryStrategy: (times) => {
-        // Only retry 3 times then stop
-        if (times > 3) return null;
-        return Math.min(times * 200, 1000);
-    },
-    // Prevent unhandled error events
-    reconnectOnError: (err) => {
-        console.warn('[Redis] Reconnect on error:', err.message);
-        return true;
-    }
-});
+export const redis = hasRedisUrl
+    ? (globalForRedis.redis || new Redis(process.env.REDIS_URL!, {
+        connectTimeout: 2000,
+        maxRetriesPerRequest: 1,
+        enableOfflineQueue: false,
+        retryStrategy: (times) => (times > 2 ? null : 200),
+    }))
+    : dummyRedis;
 
-// Avoid "Too many listeners" warning
-redis.setMaxListeners(20);
-
-redis.on('error', (err) => {
-    console.warn('[Redis] Connection Error:', err.message);
-});
-
-if (process.env.NODE_ENV !== 'production') globalForRedis.redis = redis;
+if (hasRedisUrl && process.env.NODE_ENV !== 'production') {
+    globalForRedis.redis = redis;
+}
 
 export default redis;

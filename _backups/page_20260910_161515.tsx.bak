@@ -609,7 +609,7 @@ export default function DashboardPage() {
         })
         .slice(0, 200); // Reduce ceiling to 200 for 3x faster scan
 
-      const BATCH_SIZE = 2; // 降低批次為 2 支，確保每次 API 於 1.5 秒內完成，徹底消除 Netlify 逾時風險
+      const BATCH_SIZE = 5; // 降低批次為 5 支，避開 Netlify 10 秒 API 逾時限制 (504/502)
       const allResults: AnalysisResult[] = [];
 
       for (let i = 0; i < candidates.length; i += BATCH_SIZE) {
@@ -763,7 +763,7 @@ export default function DashboardPage() {
 
       setEnhancedProgress({ current: 0, total: candidates.length, phase: '強化指標深度分析中...' });
 
-      const BATCH_SIZE = 2;
+      const BATCH_SIZE = 5;
       const allEnhancedResults: AnalysisResult[] = [];
 
       for (let i = 0; i < candidates.length; i += BATCH_SIZE) {
