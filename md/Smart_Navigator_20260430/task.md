@@ -1,5 +1,0 @@
-- [x] Backup existing files
-- [x] Create `src/lib/shares.ts` for fetching outstanding shares
-- [x] Modify `src/app/api/smart-navigator/route.ts` to use `ExchangeClient`
-- [x] Integrate real turnover rate into the logic
-- [x] Verify functionality

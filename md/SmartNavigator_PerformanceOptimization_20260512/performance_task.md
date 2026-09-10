@@ -1,7 +1,0 @@
-- [x] Back up `src/lib/exchange.ts` and `src/app/api/smart-navigator/route.ts`
-- [x] Refactor `getStockHistory` to use `Promise.all` in `src/lib/exchange.ts`
-- [x] Refactor `getTaiexHistory` to use `Promise.all` in `src/lib/exchange.ts`
-- [x] Parallelize data fetching in `src/app/api/smart-navigator/route.ts`
-- [x] Verify functionality
-- [ ] Push to GitHub
-- [ ] Handle `.md` files based on user preference

@@ -1,8 +1,0 @@
-- `[x]` Backup `src/app/smart-navigator/page.tsx`
-- `[x]` Create `MiniCalendar` component or import logic inside `page.tsx`
-- `[x]` Add UI state for auto filter panel, dates, max position percent, etc.
-- `[x]` Fetch historical dates using `getScanRecords(user.uid)` on component mount/panel open.
-- `[x]` Implement `handleAutoFilter` logic to fetch API sequentially or in batches, applying progressive filtering.
-- `[x]` Refactor the result display into a reusable component to show multiple results from the auto filter.
-- `[x]` Verify functionality.
-- `[x]` Ask user to commit & push to GitHub.

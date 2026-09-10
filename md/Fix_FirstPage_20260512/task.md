@@ -1,7 +1,0 @@
-- [x] Backup `src/app/smart-navigator/page.tsx`
-- [x] Modify `src/app/smart-navigator/page.tsx`
-    - [x] Update selector to remove list from `summaryClone`
-    - [x] Clear animations on all clones
-    - [x] Add 100ms layout delay
-- [x] Push changes to GitHub
-- [/] Ask user about MD files

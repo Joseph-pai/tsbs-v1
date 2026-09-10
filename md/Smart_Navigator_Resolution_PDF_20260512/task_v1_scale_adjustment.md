@@ -1,4 +1,0 @@
-- [x] 備份 `src/app/smart-navigator/page.tsx`
-- [x] 修改 `src/app/smart-navigator/page.tsx` 中的 `dynamicScale` 預設值並添加註解
-- [x] 推送到 GitHub
-- [x] 建立 Walkthrough 文件

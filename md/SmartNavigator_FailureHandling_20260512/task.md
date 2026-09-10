@@ -1,6 +1,0 @@
-- [x] Back up `src/app/smart-navigator/page.tsx`
-- [x] Implement `failedStocks` state and logic in `src/app/smart-navigator/page.tsx`
-- [x] Add "Failed Stocks" alert and "Retry" button to UI in `src/app/smart-navigator/page.tsx`
-- [x] Verify functionality
-- [x] Push to GitHub
-- [x] Handle `.md` files based on user preference (Saved to md folder)

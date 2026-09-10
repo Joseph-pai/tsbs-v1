@@ -1,6 +1,0 @@
-- `[x]` 備份目前版本 (已完成)
-- `[x]` 修改 src/app/page.tsx
-  - `[x]` 新增 `showDarkHorseOnly` 狀態
-  - `[x]` 更新 `filteredResults` 和 `filteredEnhancedResults`，加入黑馬過濾邏輯與排序
-  - `[x]` 實作按鈕 UI
-- `[x]` 測試並生成 Walkthrough

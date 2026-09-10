@@ -1,8 +1,0 @@
-- [ ] 備份 `src/app/smart-navigator/page.tsx`
-- [ ] 修改 `src/app/smart-navigator/page.tsx`
-    - [ ] 新增 `isExportingPDF` 狀態
-    - [ ] 新增 `handleDownloadPDF` 函數（分段截圖並合併為 PDF）
-    - [ ] 在 UI 中新增「下載 PDF」按鈕
-- [ ] 驗證功能（模擬）
-- [ ] 推送變更至 GitHub
-- [ ] 詢問使用者是否保留或刪除 .md 文件
