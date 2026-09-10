@@ -20,32 +20,49 @@ export async function POST(req: Request) {
         const { ExchangeClient } = await import('@/lib/exchange');
         const mapping = await ExchangeClient.getIndustryMapping();
 
-        // 預取大盤與 OTC 指標供相對強度(RS)計算
-        const { FinMindClient } = await import('@/lib/finmind');
+        // ── 大盤指數：使用 Redis 快取（TTL 4 小時），每天只抓一次，不隨每批重複呼叫 ──
         const { format, subDays } = await import('date-fns');
+        const { FinMindClient } = await import('@/lib/finmind');
+        const { redis } = await import('@/lib/redis');
+        const todayStr = format(new Date(), 'yyyy-MM-dd');
         const fetchStartDate = format(subDays(new Date(), 30), 'yyyy-MM-dd');
-        const fetchEndDate = format(new Date(), 'yyyy-MM-dd');
 
-        // FinMind 支援大盤(TAIEX), 我們順便嘗試抓 TPEX (IX0043 原型為上櫃指數, 不過以防萬一可以用 TAIEX 暫代或雙重嘗試)
-        // 在 FinMind 中, 加權指數代碼為 TAIEX
-        const taiexHistory = await FinMindClient.getDailyStats({ stockId: 'TAIEX', startDate: fetchStartDate, endDate: fetchEndDate }).catch(() => []);
-        // 對於上櫃指數, FinMind 代號可能因授權或其他原因不存在, 若如此, 回退使用 TAIEX 做大盤相對指標
-        const tpexHistory = await FinMindClient.getDailyStats({ stockId: 'IX0043', startDate: fetchStartDate, endDate: fetchEndDate }).catch(() => []);
+        const indexCacheKey = `tsbs:index:daily:${todayStr}`;
+        let indexData: { TAIEX: any[]; TPEX: any[] } = { TAIEX: [], TPEX: [] };
 
-        const indexData = { 
-            TAIEX: taiexHistory, 
-            TPEX: tpexHistory.length > 0 ? tpexHistory : taiexHistory // Fallback
-        };
+        try {
+            const cachedIndex = await redis.get(indexCacheKey);
+            if (cachedIndex) {
+                indexData = JSON.parse(cachedIndex);
+                console.log('[Analyze API] Index data loaded from Redis cache.');
+            }
+        } catch (_) {}
+
+        if (indexData.TAIEX.length === 0) {
+            console.log('[Analyze API] Fetching index data from FinMind...');
+            const [taiexHistory, tpexHistory] = await Promise.all([
+                FinMindClient.getDailyStats({ stockId: 'TAIEX', startDate: fetchStartDate, endDate: todayStr }).catch(() => []),
+                FinMindClient.getDailyStats({ stockId: 'IX0043', startDate: fetchStartDate, endDate: todayStr }).catch(() => [])
+            ]);
+            indexData = {
+                TAIEX: taiexHistory,
+                TPEX: tpexHistory.length > 0 ? tpexHistory : taiexHistory
+            };
+            // 快取 4 小時（14400 秒）
+            if (taiexHistory.length > 0) {
+                try { await redis.set(indexCacheKey, JSON.stringify(indexData), 'EX', 14400); } catch (_) {}
+            }
+        }
 
         // Use the optimized ScannerService which handles Redis caching internally
         const results: AnalysisResult[] = [];
 
-        // 併發控制：調整為 2 支一組，防護 Netlify 10 秒 API 逾時
-        const batchSize = 2;
+        // 方案 A 最佳化：一次最多 20 支（前端已預篩），並行處理，8 秒逾時保護
+        const batchSize = 20;
         for (let i = 0; i < stocks.length; i += batchSize) {
-            // 防護 Netlify 10 秒硬性逾時：接近 6 秒即提前返回既有結果
-            if (Date.now() - startTime > 6000) {
-                console.warn(`[Analyze API] Approaching 6s timeout limit (${Date.now() - startTime}ms), returning early with ${results.length} results.`);
+            // 防護 Netlify 10 秒硬性逾時：接近 8 秒即提前返回既有結果
+            if (Date.now() - startTime > 8000) {
+                console.warn(`[Analyze API] Approaching 8s timeout limit (${Date.now() - startTime}ms), returning early with ${results.length} results.`);
                 break;
             }
 
@@ -65,7 +82,7 @@ export async function POST(req: Request) {
             });
         }
 
-        console.log(`[Analyze API] Batch complete: ${results.length}/${stocks.length} analyzed (Includes cache hits)`);
+        console.log(`[Analyze API] Batch complete: ${results.length}/${stocks.length} analyzed in ${Date.now() - startTime}ms`);
 
         return NextResponse.json({
             success: true,

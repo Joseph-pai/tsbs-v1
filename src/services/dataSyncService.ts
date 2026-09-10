@@ -33,6 +33,20 @@ export const DataSyncService = {
     },
 
     /**
+     * 讀取本地已儲存的產業對應表
+     */
+    getLocalIndustryMap: (): Record<string, string> => {
+        if (typeof window === 'undefined') return {};
+        try {
+            const cached = localStorage.getItem(INDUSTRY_MAP_KEY) || sessionStorage.getItem(INDUSTRY_MAP_KEY);
+            return cached ? JSON.parse(cached) : {};
+        } catch (e) {
+            console.error('[DataSync] Read local industry map failed:', e);
+            return {};
+        }
+    },
+
+    /**
      * 讀取本地已儲存的市場股票快照數據
      */
     getLocalSnapshot: (market: 'TWSE' | 'TPEX' | 'ALL' = 'TWSE'): StockData[] => {

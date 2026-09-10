@@ -621,17 +621,21 @@ export default function DashboardPage() {
       }
 
       setStage('filtering');
-      setProgress({ current: 0, total: snapshot.length, phase: '正在篩選潛力候選股...' });
+      setProgress({ current: 0, total: snapshot.length, phase: '🔍 本地快速預篩中（紅K + 量能排序）...' });
 
       // Match exact stock ID for targeted analysis
       const targetTerm = activeTerm.trim();
       const isSearchId = targetTerm.length === 4 && !isNaN(parseInt(targetTerm));
 
+      // ── 方案 A：本地預篩，取 Top 20，只發 1 次 API ──────────────────
+      // 用快照的今日欄位做快速過濾（純前端 JS，不需任何 API 呼叫）
+      const PRE_FILTER_LIMIT = 20; // 只送 Top 20 給後端深度分析
+
       const candidates = snapshot
         .filter(s => {
           const isTarget = isSearchId && s.stock_id === targetTerm;
-          // Pre-filter: Focus on stocks with volume and not crashing (spread >= 0)
-          const isPotential = s.Trading_Volume > 0 && s.spread >= -0.1;
+          // 預篩：紅 K（收盤 > 開盤）+ 有成交量 + 非重挫（spread >= -0.05）
+          const isPotential = s.Trading_Volume > 500 && s.close > s.open && s.spread >= -0.05;
           return isTarget || isPotential;
         })
         .sort((a, b) => {
@@ -639,50 +643,44 @@ export default function DashboardPage() {
           const bIsTarget = isSearchId && b.stock_id === targetTerm;
           if (aIsTarget && !bIsTarget) return -1;
           if (!aIsTarget && bIsTarget) return 1;
+          // 主排序：成交量（代表市場關注度）
           return b.Trading_Volume - a.Trading_Volume;
         })
-        .slice(0, 200); // Reduce ceiling to 200 for 3x faster scan
+        .slice(0, PRE_FILTER_LIMIT);
 
-      const BATCH_SIZE = 2; // 降低批次為 2 支，確保每次 API 於 1.5 秒內完成，徹底消除 Netlify 逾時風險
+      console.log(`[runScan] 本地預篩完成：從 ${snapshot.length} 支 → Top ${candidates.length} 支，準備發送深度分析...`);
+
+      setProgress({
+        current: candidates.length,
+        total: candidates.length,
+        phase: `⚡ 深度指標分析中（${candidates.length} 支）...`
+      });
+
       const allResults: AnalysisResult[] = [];
 
-      for (let i = 0; i < candidates.length; i += BATCH_SIZE) {
-        const batch = candidates.slice(i, i + BATCH_SIZE);
-        setProgress({
-          current: i + batch.length,
-          total: candidates.length,
-          phase: `指標數據分析中 (${i + batch.length}/${candidates.length})`
-        });
-
+      // ── 一次性發送全部 Top 20，後端並行處理（1 次 API 取代原本 125+ 次）──
+      if (candidates.length > 0) {
         const batchRes = await fetch('/api/scan/analyze', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            stocks: batch.map(c => ({ id: c.stock_id, name: c.stock_name })),
+            stocks: candidates.map(c => ({ id: c.stock_id, name: c.stock_name })),
             settings: settings
           })
         });
 
-        if (!batchRes.ok) {
-          console.warn(`[Analyze Batch] HTTP ${batchRes.status} on batch ${Math.floor(i / BATCH_SIZE) + 1}`);
-          continue;
-        }
-
-        const batchJson = await batchRes.json();
-        if (batchJson.success && batchJson.data) {
-          const augmented = batchJson.data.map((r: any) => {
-            const resolvedSector = r.sector_name || (market === 'TWSE' ? '上市板' : '上櫃板');
-
-            // Use the comprehensive score directly from the backend
-            const potential_score = r.comprehensiveScoreDetails?.total ?? ((r.score || 0) * 100);
-
-            return {
-              ...r,
-              sector_name: resolvedSector,
-              potential_score
-            };
-          });
-          allResults.push(...augmented);
+        if (batchRes.ok) {
+          const batchJson = await batchRes.json();
+          if (batchJson.success && batchJson.data) {
+            const augmented = batchJson.data.map((r: any) => {
+              const resolvedSector = r.sector_name || (market === 'TWSE' ? '上市板' : '上櫃板');
+              const potential_score = r.comprehensiveScoreDetails?.total ?? ((r.score || 0) * 100);
+              return { ...r, sector_name: resolvedSector, potential_score };
+            });
+            allResults.push(...augmented);
+          }
+        } else {
+          console.warn(`[runScan] 深度分析 API 失敗 (HTTP ${batchRes.status})`);
         }
       }
 
@@ -774,16 +772,19 @@ export default function DashboardPage() {
       }
       const t1 = Date.now();
 
-      setEnhancedProgress({ current: 0, total: snap.length, phase: '強化篩選候選股（成交金額排序）...' });
+      setEnhancedProgress({ current: 0, total: snap.length, phase: '🔍 本地快速預篩中（成交金額排序）...' });
 
       const targetTerm = searchTerm.trim();
       const isSearchId = targetTerm.length === 4 && !isNaN(parseInt(targetTerm));
 
-      // Phase 1：改用成交金額（量×價）排序，讓小股本被公平評估
+      // ── 方案 A：強化評分版本 — 本地預篩取 Top 20，只發 1 次 API ──
+      // 改用成交金額（量×價）排序，讓小股本被公平評估
+      const ENHANCED_LIMIT = 20;
       const candidates = snap
         .filter(s => {
           const isTarget = isSearchId && s.stock_id === targetTerm;
-          const isPotential = s.Trading_Volume > 0 && s.spread >= -0.1;
+          // 強化預篩：紅 K + 有成交量
+          const isPotential = s.Trading_Volume > 500 && s.close > s.open && s.spread >= -0.05;
           return isTarget || isPotential;
         })
         .sort((a, b) => {
@@ -791,49 +792,43 @@ export default function DashboardPage() {
           const bIsTarget = isSearchId && b.stock_id === targetTerm;
           if (aIsTarget && !bIsTarget) return -1;
           if (!aIsTarget && bIsTarget) return 1;
-          // 成交金額 = 量 × 收盤價（間接換手率正規化）
+          // 成交金額 = 量 × 收盤價（小股本公平化）
           const aTurnover = (a as any).Trading_money || a.Trading_Volume * a.close;
           const bTurnover = (b as any).Trading_money || b.Trading_Volume * b.close;
           return bTurnover - aTurnover;
         })
-        .slice(0, 250); // 比原始多 50 支，覆蓋更多小股本
+        .slice(0, ENHANCED_LIMIT);
 
-      setEnhancedProgress({ current: 0, total: candidates.length, phase: '強化指標深度分析中...' });
+      console.log(`[runEnhancedScan] 本地預篩完成：從 ${snap.length} 支 → Top ${candidates.length} 支（成交金額排序）`);
 
-      const BATCH_SIZE = 2;
+      setEnhancedProgress({ current: candidates.length, total: candidates.length, phase: `⚡ 強化深度分析中（${candidates.length} 支）...` });
+
       const allEnhancedResults: AnalysisResult[] = [];
 
-      for (let i = 0; i < candidates.length; i += BATCH_SIZE) {
-        const batch = candidates.slice(i, i + BATCH_SIZE);
-        setEnhancedProgress({
-          current: i + batch.length,
-          total: candidates.length,
-          phase: `強化分析中 (${i + batch.length}/${candidates.length})`
-        });
-
+      // ── 一次性發送全部 Top 20，強化評分模式，後端並行處理（1 次 API）──
+      if (candidates.length > 0) {
         const batchRes = await fetch('/api/scan/analyze', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            stocks: batch.map(c => ({ id: c.stock_id, name: c.stock_name })),
+            stocks: candidates.map(c => ({ id: c.stock_id, name: c.stock_name })),
             settings: settings,
-            enhanced: true  // 啟用強化評分模式
+            enhanced: true
           })
         });
 
-        if (!batchRes.ok) {
-          console.warn(`[Enhanced Batch] HTTP ${batchRes.status} on batch ${Math.floor(i / BATCH_SIZE) + 1}`);
-          continue;
-        }
-
-        const batchJson = await batchRes.json();
-        if (batchJson.success && batchJson.data) {
-          const augmented = batchJson.data.map((r: any) => ({
-            ...r,
-            sector_name: r.sector_name || (market === 'TWSE' ? '上市板' : '上櫃板'),
-            potential_score: r.comprehensiveScoreDetails?.total ?? ((r.score || 0) * 100)
-          }));
-          allEnhancedResults.push(...augmented);
+        if (batchRes.ok) {
+          const batchJson = await batchRes.json();
+          if (batchJson.success && batchJson.data) {
+            const augmented = batchJson.data.map((r: any) => ({
+              ...r,
+              sector_name: r.sector_name || (market === 'TWSE' ? '上市板' : '上櫃板'),
+              potential_score: r.comprehensiveScoreDetails?.total ?? ((r.score || 0) * 100)
+            }));
+            allEnhancedResults.push(...augmented);
+          }
+        } else {
+          console.warn(`[runEnhancedScan] 強化分析 API 失敗 (HTTP ${batchRes.status})`);
         }
       }
 
