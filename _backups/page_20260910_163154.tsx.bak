@@ -18,7 +18,6 @@ import CycleMethodModal from '@/components/CycleMethodModal';
 import { CycleResult } from '@/services/cycleScanner';
 import { useAuth } from '@/lib/firebase/context/AuthContext';
 import { saveScanRecord, saveBacktestRecord, getScanRecords, deleteScanRecord, updateScanRecord } from '@/services/firebaseDb';
-import { DataSyncService, SyncStatus } from '@/services/dataSyncService';
 import { auth } from '@/lib/firebase/config';
 import { signOut } from 'firebase/auth';
 import { exportToPDF } from '@/lib/pdfUtils';
@@ -116,35 +115,6 @@ export default function DashboardPage() {
   const [isCycleScanning, setIsCycleScanning] = useState(false);
   const [cycleResults, setCycleResults] = useState<CycleResult[]>([]);
   const [showCycleModal, setShowCycleModal] = useState(false);
-
-  // ── 本地數據倉庫與下載最新股票數據 ──
-  const [syncStatus, setSyncStatus] = useState<SyncStatus>({ hasData: false, lastSyncTime: null, totalStocks: 0 });
-  const [isSyncing, setIsSyncing] = useState(false);
-  const [syncMessage, setSyncMessage] = useState('');
-
-  useEffect(() => {
-    setSyncStatus(DataSyncService.getStatus());
-  }, []);
-
-  const handleDownloadLatestData = async () => {
-    setIsSyncing(true);
-    setSyncMessage('正在連線證交所與上櫃中心...');
-
-    const res = await DataSyncService.downloadLatestMarketData((progress) => {
-      setSyncMessage(progress.stage);
-    });
-
-    if (res.success) {
-      const updatedStatus = DataSyncService.getStatus();
-      setSyncStatus(updatedStatus);
-      alert(`✅ 成功下載最新股票數據！\n總共載入 ${res.count} 档股票。\n最新數據時間：${res.timestamp}`);
-    } else {
-      alert(`❌ 數據下載失敗：${res.error || '未知錯誤'}`);
-    }
-
-    setIsSyncing(false);
-    setSyncMessage('');
-  };
 
   const handleLogout = async () => {
     try {
@@ -600,18 +570,14 @@ export default function DashboardPage() {
     const t0 = Date.now();
 
     try {
-      // Phase 1: Directed Fetch (優先從本地預載數據庫獲取)
+      // Phase 1: Directed Fetch
       setProgress({ current: 0, total: 0, phase: `正在獲取 ${MARKET_NAMES[market]} - ${currentSectorName} 數據...` });
 
-      let snapshot: StockData[] = forceRefresh ? [] : DataSyncService.getLocalSnapshot(market);
+      const snapshotRes = await fetch(`/api/market/snapshot?market=${market}&sector=${sector}${forceRefresh ? '&refresh=true' : ''}`);
+      const snapshotJson = await snapshotRes.json();
+      if (!snapshotJson.success) throw new Error(snapshotJson.error);
 
-      if (snapshot.length === 0 || forceRefresh) {
-        const snapshotRes = await fetch(`/api/market/snapshot?market=${market}&sector=${sector}${forceRefresh ? '&refresh=true' : ''}`);
-        const snapshotJson = await snapshotRes.json();
-        if (!snapshotJson.success) throw new Error(snapshotJson.error);
-        snapshot = snapshotJson.data;
-      }
-
+      const snapshot: StockData[] = snapshotJson.data;
       setSnapshot(snapshot);
       const t1 = Date.now();
 
@@ -765,13 +731,10 @@ export default function DashboardPage() {
     const t0 = Date.now();
 
     try {
-      let snap: StockData[] = DataSyncService.getLocalSnapshot(market);
-      if (snap.length === 0) {
-        const snapshotRes = await fetch(`/api/market/snapshot?market=${market}&sector=${sector}`);
-        const snapshotJson = await snapshotRes.json();
-        if (!snapshotJson.success) throw new Error(snapshotJson.error);
-        snap = snapshotJson.data;
-      }
+      const snapshotRes = await fetch(`/api/market/snapshot?market=${market}&sector=${sector}`);
+      const snapshotJson = await snapshotRes.json();
+      if (!snapshotJson.success) throw new Error(snapshotJson.error);
+      const snap: StockData[] = snapshotJson.data;
       const t1 = Date.now();
 
       setEnhancedProgress({ current: 0, total: snap.length, phase: '強化篩選候選股（成交金額排序）...' });
