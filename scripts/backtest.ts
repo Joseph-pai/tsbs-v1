@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { runMarketBacktest } from '../src/backtest/backtestRunner';
 import { generateTextReport, generateJSONReport, generateCSVReport } from '../src/backtest/report';
+import { analyzeFactors, generateFactorAnalysisMarkdown } from '../src/backtest/factorAnalysis';
 
 async function main() {
     console.log('==========================================================');
@@ -44,26 +45,41 @@ async function main() {
     const jsonReport = generateJSONReport(result.metrics, result.ledgerItems, periodOpts);
     const csvReport = generateCSVReport(result.ledgerItems);
 
+    // 進行 Factor Analysis
+    const factorAnalysisResult = analyzeFactors(result.ledgerItems);
+    const factorMdReport = generateFactorAnalysisMarkdown(factorAnalysisResult);
+
     // 建立輸出目錄 backtest-results/
     const outputDir = path.join(process.cwd(), 'backtest-results');
     if (!fs.existsSync(outputDir)) {
         fs.mkdirSync(outputDir, { recursive: true });
     }
 
+    const docsDir = path.join(process.cwd(), 'docs');
+    if (!fs.existsSync(docsDir)) {
+        fs.mkdirSync(docsDir, { recursive: true });
+    }
+
     const txtPath = path.join(outputDir, 'summary.txt');
     const jsonPath = path.join(outputDir, 'summary.json');
     const csvPath = path.join(outputDir, 'ledger.csv');
+    const factorJsonPath = path.join(outputDir, 'factor-analysis.json');
+    const factorMdPath = path.join(docsDir, 'FACTOR_ANALYSIS.md');
 
     fs.writeFileSync(txtPath, textReport, 'utf-8');
     fs.writeFileSync(jsonPath, jsonReport, 'utf-8');
     fs.writeFileSync(csvPath, csvReport, 'utf-8');
+    fs.writeFileSync(factorJsonPath, JSON.stringify(factorAnalysisResult, null, 2), 'utf-8');
+    fs.writeFileSync(factorMdPath, factorMdReport, 'utf-8');
 
     console.log('\n' + textReport + '\n');
     console.log('==========================================================');
-    console.log(`[Backtest] 報告匯出完成：`);
+    console.log(`[Backtest] 報告與因子分析匯出完成：`);
     console.log(` - 文字報告: ${txtPath}`);
     console.log(` - JSON 報告: ${jsonPath}`);
     console.log(` - CSV  明細: ${csvPath}`);
+    console.log(` - Factor JSON: ${factorJsonPath}`);
+    console.log(` - Factor Markdown: ${factorMdPath}`);
     console.log('==========================================================');
 }
 

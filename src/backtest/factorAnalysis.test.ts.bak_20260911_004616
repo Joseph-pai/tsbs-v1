@@ -1,0 +1,82 @@
+import { test, describe } from 'node:test';
+import assert from 'node:assert/strict';
+import { analyzeFactors, generateFactorAnalysisMarkdown } from './factorAnalysis';
+import { PredictionLedgerItem } from './types';
+
+describe('Factor Analysis Unit Tests', () => {
+
+    const sampleItems: PredictionLedgerItem[] = [
+        {
+            id: '1',
+            signalDate: '2026-09-01',
+            stockId: '2330',
+            stockName: '台積電',
+            market: 'TWSE',
+            signalClose: 1000,
+            score: 0.9,
+            rank: 1,
+            reasons: ['VOLUME_EXPLOSION', 'BREAKOUT', 'BULLISH_MA', 'MA_SQUEEZE'],
+            targetPrice: 1100,
+            day1High: 1020, day2High: 1050, day3High: 1110, day4High: 1080, day5High: 1090,
+            maxHigh: 1110,
+            maxReturn: 0.11,
+            hit5d10: true,
+            daysToTarget: 3,
+            dataComplete: true,
+        },
+        {
+            id: '2',
+            signalDate: '2026-09-02',
+            stockId: '2317',
+            stockName: '鴻海',
+            market: 'TWSE',
+            signalClose: 100,
+            score: 0.7,
+            rank: 2,
+            reasons: ['VOLUME_INCREASING'],
+            targetPrice: 110,
+            day1High: 101, day2High: 102, day3High: 103, day4High: 104, day5High: 105,
+            maxHigh: 105,
+            maxReturn: 0.05,
+            hit5d10: false,
+            daysToTarget: null,
+            dataComplete: true,
+        }
+    ];
+
+    test('1. analyzeFactors 正確計算因子 Bucket 統計數據', () => {
+        const result = analyzeFactors(sampleItems);
+
+        assert.equal(result.totalSignalsAnalyzed, 2);
+        assert.equal(result.validSignalsAnalyzed, 2);
+        assert.equal(result.factors.length, 5);
+
+        // Volume Ratio 因子
+        const vrFactor = result.factors.find(f => f.factorName.includes('Volume Ratio'));
+        assert.ok(vrFactor);
+        const ge3Bucket = vrFactor?.buckets.find(b => b.bucketName === '3.0+');
+        assert.ok(ge3Bucket);
+        assert.equal(ge3Bucket?.sampleSize, 1);
+        assert.equal(ge3Bucket?.hitCount, 1);
+        assert.equal(ge3Bucket?.hitRate5d10, 1.0);
+
+        // Breakout 因子
+        const boFactor = result.factors.find(f => f.factorName.includes('Breakout Signal'));
+        assert.ok(boFactor);
+        const boTrueBucket = boFactor?.buckets.find(b => b.bucketName === 'Breakout = True');
+        assert.equal(boTrueBucket?.sampleSize, 1);
+        assert.equal(boTrueBucket?.hitCount, 1);
+    });
+
+    test('2. generateFactorAnalysisMarkdown 產出包含特定標題與研究聲明之 Markdown 報告', () => {
+        const result = analyzeFactors(sampleItems);
+        const mdText = generateFactorAnalysisMarkdown(result);
+
+        assert.ok(mdText.includes('# 台股短線選股因子分析報告 (Factor Analysis Report)'));
+        assert.ok(mdText.includes('具備潛在預測力之因子'));
+        assert.ok(mdText.includes('無明顯效果之因子'));
+        assert.ok(mdText.includes('樣本數過小待觀察之因子'));
+        assert.ok(mdText.includes('研究聲明 (Research Disclaimer)'));
+        assert.ok(mdText.includes('絕對禁止'));
+    });
+});
