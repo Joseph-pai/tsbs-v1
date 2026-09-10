@@ -1279,6 +1279,31 @@ export default function DashboardPage() {
             </button>
 
           </div>
+
+          {/* 數據更新時程說明 */}
+          <div className="mt-4 pt-4 border-t border-cyan-500/20 text-xs text-slate-300 space-y-2">
+            <div className="flex items-center gap-1.5 text-cyan-300 font-bold">
+              <Clock className="w-4 h-4 text-cyan-400 flex-shrink-0" />
+              <span>數據更新時程說明：</span>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 bg-slate-950/60 p-3 rounded-xl border border-slate-800/80">
+              <div className="space-y-1">
+                <span className="text-cyan-200 font-bold block">🏛️ 證交所 / 櫃買中心官方發布時程：</span>
+                <ul className="space-y-0.5 text-slate-400 pl-1">
+                  <li>• <strong className="text-slate-300 font-mono">14:30 ~ 15:00</strong>：公布當日個股收盤價與成交量。</li>
+                  <li>• <strong className="text-slate-300 font-mono">15:00 ~ 15:30</strong>：公布當日三大法人買賣超初步總額。</li>
+                  <li>• <strong className="text-slate-300 font-mono">17:00 ~ 17:30</strong>：公布當日詳細的主力券商分點進出明細與完整籌碼資料。</li>
+                </ul>
+              </div>
+              <div className="space-y-1">
+                <span className="text-cyan-200 font-bold block">⚡ FinMind API 資料庫同步時間：</span>
+                <ul className="space-y-0.5 text-slate-400 pl-1">
+                  <li>• 三大法人數據約在 <strong className="text-amber-300 font-mono">15:30 - 16:30</strong> 陸續同步完畢。</li>
+                  <li>• 完整的三大法人 + 主力券商籌碼數據通常要到 <strong className="text-amber-300 font-mono">17:30 之後</strong>才會全面更新完畢。</li>
+                </ul>
+              </div>
+            </div>
+          </div>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
           <div className="space-y-4">
